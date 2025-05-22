@@ -2,7 +2,8 @@ use kube::{
     api::{Api, PostParams},
     Client,
 };
-use std::collections::HashMap;
+use std::collections::BTreeMap;
+use k8s_openapi::apimachinery::pkg::api::resource::Quantity;
 use crate::{
     Task,
     Result,
@@ -48,7 +49,7 @@ impl KubeClient {
                 name: Some(format!("openhands-task-{}", task.id)),
                 namespace: Some(self.namespace.clone()),
                 labels: Some({
-                    let mut labels = HashMap::new();
+                    let mut labels = BTreeMap::new();
                     labels.insert("app.kubernetes.io/name".to_string(), "punching-fist".to_string());
                     labels.insert("task.type".to_string(), "openhands".to_string());
                     labels.insert("task.id".to_string(), task.id.clone());
@@ -112,15 +113,15 @@ impl KubeClient {
                             ]),
                             resources: Some(k8s_openapi::api::core::v1::ResourceRequirements {
                                 limits: Some({
-                                    let mut limits = HashMap::new();
-                                    limits.insert("cpu".to_string(), task.resources.cpu_limit.clone());
-                                    limits.insert("memory".to_string(), task.resources.memory_limit.clone());
+                                    let mut limits = BTreeMap::new();
+                                    limits.insert("cpu".to_string(), Quantity(task.resources.cpu_limit.clone()));
+                                    limits.insert("memory".to_string(), Quantity(task.resources.memory_limit.clone()));
                                     limits
                                 }),
                                 requests: Some({
-                                    let mut requests = HashMap::new();
-                                    requests.insert("cpu".to_string(), task.resources.cpu_request.clone());
-                                    requests.insert("memory".to_string(), task.resources.memory_request.clone());
+                                    let mut requests = BTreeMap::new();
+                                    requests.insert("cpu".to_string(), Quantity(task.resources.cpu_request.clone()));
+                                    requests.insert("memory".to_string(), Quantity(task.resources.memory_request.clone()));
                                     requests
                                 }),
                                 ..Default::default()

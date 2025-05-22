@@ -3,7 +3,7 @@ use uuid::Uuid;
 use crate::{
     kubernetes::KubeClient,
     openhands::OpenHandsClient,
-    server::websocket::Alert,
+    server::Alert,
     Task,
     TaskMetrics,
     Result,
@@ -51,12 +51,28 @@ impl TaskScheduler {
         self.metrics.tasks_total += 1;
         self.metrics.tasks_running += 1;
 
-        self.kube_client.create_task_job(&task).await?;
+        // Always try to offload the work to Kubernetes first. If that fails
+        // (for example when the operator is running outside a cluster during
+        // local development), fall back to executing OpenHands in-process via
+        // headless mode.
+
+        if let Err(k8s_err) = self.kube_client.create_task_job(&task).await {
+            tracing::warn!(error = %k8s_err, "failed to create Job in Kubernetes – falling back to local headless execution");
+
+            // Attempt local execution. Propagate any errors to the caller so
+            // they can be tracked in metrics.
+            self.openhands_client.process_task(&task).await?;
+        }
 
         Ok(())
     }
 
     pub fn get_metrics(&self) -> TaskMetrics {
-        self.metrics.clone()
+        TaskMetrics {
+            tasks_total: self.metrics.tasks_total,
+            tasks_running: self.metrics.tasks_running,
+            tasks_succeeded: self.metrics.tasks_succeeded,
+            tasks_failed: self.metrics.tasks_failed,
+        }
     }
 } 

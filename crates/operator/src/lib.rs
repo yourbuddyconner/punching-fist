@@ -1,3 +1,5 @@
+pub mod config;
+pub mod store;
 pub mod server;
 pub mod kubernetes;
 pub mod openhands;
@@ -17,6 +19,16 @@ pub enum OperatorError {
     Task(String),
     #[error("Configuration error: {0}")]
     Config(String),
+    #[error("IO error: {0}")]
+    Io(#[from] std::io::Error),
+    #[error("YAML parsing error: {0}")]
+    Yaml(#[from] serde_yaml::Error),
+    #[error("Database migration error: {0}")]
+    Migrate(#[from] sqlx::migrate::MigrateError),
+    #[error("SQLx error: {0}")]
+    Sqlx(#[from] sqlx::Error),
+    #[error("JSON error: {0}")]
+    SerdeJson(#[from] serde_json::Error),
 }
 
 pub type Result<T> = std::result::Result<T, OperatorError>;

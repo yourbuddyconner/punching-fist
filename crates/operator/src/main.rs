@@ -1,46 +1,50 @@
-use punching_fist_operator::{
-    kubernetes::KubeClient,
-    openhands::OpenHandsClient,
-    server::Server,
-    scheduler::TaskScheduler,
-    Result,
-};
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use tracing::{info, Level};
-use tracing_subscriber::FmtSubscriber;
+use tracing::info;
+
+// becomes:
+use punching_fist_operator::{
+    config::Config,
+    kubernetes::KubeClient,
+    openhands::OpenHandsClient,
+    scheduler::TaskScheduler,
+    server::Server,
+    store::{self, create_store},
+    Result,
+};
 
 #[tokio::main]
 async fn main() -> Result<()> {
     // Initialize logging
-    let subscriber = FmtSubscriber::builder()
-        .with_max_level(Level::INFO)
-        .with_target(false)
-        .with_thread_ids(true)
-        .with_file(true)
-        .with_line_number(true)
-        .with_thread_names(true)
-        .with_ansi(true)
-        .pretty()
-        .init();
+    tracing_subscriber::fmt::init();
 
-    info!("Starting Punching Fist Operator");
+    // Load configuration
+    let config = Config::load()?;
+    info!("Loaded configuration: {:?}", config);
 
-    // Initialize Kubernetes client
-    let kube_client = KubeClient::new().await?;
-    let kube_client = Arc::new(kube_client);
+    // Initialize store
+    let store_boxed = create_store(&config.database).await?;
+    store_boxed.init().await?;
+    let store: Arc<dyn store::Store> = Arc::from(store_boxed);
 
-    // Initialize OpenHands client
-    let openhands_client = OpenHandsClient::new()?;
-    let openhands_client = Arc::new(openhands_client);
+    // Initialize KubeClient
+    let kube_client = Arc::new(KubeClient::new().await?);
 
-    // Initialize task scheduler
-    let scheduler = TaskScheduler::new(kube_client.clone(), openhands_client.clone());
-    let scheduler = Arc::new(Mutex::new(scheduler));
+    // Initialize OpenHandsClient
+    let openhands_client = Arc::new(OpenHandsClient::new()?);
 
-    // Initialize and start the server
-    let server = Server::new(scheduler.clone());
-    server.start().await?;
+    // Initialize scheduler
+    let scheduler = Arc::new(Mutex::new(TaskScheduler::new(
+        kube_client,
+        openhands_client,
+    )));
+
+    // Initialize server
+    let server = Server::new(&config, scheduler.clone(), store.clone());
+
+    // Start server
+    info!("Starting server on {}", config.server.addr);
+    server.start(&config.server.addr).await?;
 
     Ok(())
 } 

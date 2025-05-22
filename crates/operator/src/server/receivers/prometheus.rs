@@ -3,7 +3,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use uuid::Uuid;
-use crate::Result;
+use crate::{Result, OperatorError};
 
 use super::traits::{Alert, AlertReceiver, Task, TaskResources};
 
@@ -58,14 +58,14 @@ impl PrometheusReceiver {
         Self { config }
     }
 
-    fn validate_alert(&self, alert: &PrometheusAlert) -> Result<()> {
+    fn validate_prometheus_alert(&self, alert: &PrometheusAlert) -> Result<()> {
         if alert.version != "4" {
-            return Err(crate::OperatorError::Config("Unsupported alert version".into()));
+            return Err(OperatorError::Config("Unsupported alert version".into()));
         }
         Ok(())
     }
 
-    fn transform_alert(&self, alert: PrometheusAlert) -> Result<Task> {
+    fn transform_prometheus_alert(&self, alert: PrometheusAlert) -> Result<Task> {
         let task = Task {
             id: Uuid::new_v4().to_string(),
             prompt: format!(
@@ -105,10 +105,10 @@ impl AlertReceiver for PrometheusReceiver {
     fn validate_alert(&self, alert: &Alert) -> Result<()> {
         // Basic validation
         if alert.name.is_empty() {
-            return Err(crate::OperatorError::Config("Alert name is required".into()));
+            return Err(OperatorError::Config("Alert name is required".into()));
         }
         if alert.status.is_empty() {
-            return Err(crate::OperatorError::Config("Alert status is required".into()));
+            return Err(OperatorError::Config("Alert status is required".into()));
         }
         Ok(())
     }
