@@ -11,8 +11,11 @@ pub struct OpenHandsClient {
 
 impl OpenHandsClient {
     pub fn new() -> Result<Self> {
-        let api_key = std::env::var("OPENHANDS_API_KEY")
-            .map_err(|_| OperatorError::Config("OPENHANDS_API_KEY not set".to_string()))?;
+        // OpenHands requires an API key provided via `LLM_API_KEY`.
+        let api_key = std::env::var("LLM_API_KEY")
+            .map_err(|_| OperatorError::Config(
+                "LLM_API_KEY environment variable must be set".to_string(),
+            ))?;
 
         let client = Client::new();
 

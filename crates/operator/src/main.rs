@@ -37,6 +37,7 @@ async fn main() -> Result<()> {
     let scheduler = Arc::new(Mutex::new(TaskScheduler::new(
         kube_client,
         openhands_client,
+        config.execution.mode.clone(),
     )));
 
     // Initialize server

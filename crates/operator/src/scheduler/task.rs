@@ -7,23 +7,27 @@ use crate::{
     Task,
     TaskMetrics,
     Result,
+    config::TaskExecutionMode,
 };
 
 pub struct TaskScheduler {
     kube_client: Arc<KubeClient>,
     openhands_client: Arc<OpenHandsClient>,
     metrics: TaskMetrics,
+    execution_mode: TaskExecutionMode,
 }
 
 impl TaskScheduler {
     pub fn new(
         kube_client: Arc<KubeClient>,
         openhands_client: Arc<OpenHandsClient>,
+        execution_mode: TaskExecutionMode,
     ) -> Self {
         Self {
             kube_client,
             openhands_client,
             metrics: TaskMetrics::default(),
+            execution_mode,
         }
     }
 
@@ -51,17 +55,24 @@ impl TaskScheduler {
         self.metrics.tasks_total += 1;
         self.metrics.tasks_running += 1;
 
-        // Always try to offload the work to Kubernetes first. If that fails
-        // (for example when the operator is running outside a cluster during
-        // local development), fall back to executing OpenHands in-process via
-        // headless mode.
+        match self.execution_mode {
+            TaskExecutionMode::Local => {
+                // Execute directly in-process (optionally in its own task)
+                // Here we simply await the completion; callers may run the
+                // scheduler on a dedicated Tokio runtime/thread pool.
+                self.openhands_client.process_task(&task).await?;
+            }
+            TaskExecutionMode::Kubernetes => {
+                // Try to offload to Kubernetes Job, fall back to local on
+                // failure (e.g. when running outside a cluster).
+                if let Err(k8s_err) = self.kube_client.create_task_job(&task).await {
+                    tracing::warn!(error = %k8s_err, "failed to create Job in Kubernetes – falling back to local headless execution");
 
-        if let Err(k8s_err) = self.kube_client.create_task_job(&task).await {
-            tracing::warn!(error = %k8s_err, "failed to create Job in Kubernetes – falling back to local headless execution");
-
-            // Attempt local execution. Propagate any errors to the caller so
-            // they can be tracked in metrics.
-            self.openhands_client.process_task(&task).await?;
+                    // Attempt local execution. Propagate any errors to the
+                    // caller so they can be tracked in metrics.
+                    self.openhands_client.process_task(&task).await?;
+                }
+            }
         }
 
         Ok(())

@@ -3,12 +3,42 @@ use std::path::PathBuf;
 
 use crate::store::{DatabaseConfig, DatabaseType};
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum TaskExecutionMode {
+    #[serde(rename = "local")]
+    Local,
+    #[serde(rename = "kubernetes")]
+    Kubernetes,
+}
+
+impl Default for TaskExecutionMode {
+    fn default() -> Self {
+        TaskExecutionMode::Local
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExecutionConfig {
+    #[serde(default)]
+    pub mode: TaskExecutionMode,
+}
+
+impl Default for ExecutionConfig {
+    fn default() -> Self {
+        Self {
+            mode: TaskExecutionMode::Local,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
     pub server: ServerConfig,
     pub database: DatabaseConfig,
     pub kube: KubeConfig,
     pub openhands: OpenHandsConfig,
+    #[serde(default)]
+    pub execution: ExecutionConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -57,6 +87,7 @@ impl Default for Config {
                 api_url: "http://localhost:8080".to_string(),
                 api_key: "".to_string(),
             },
+            execution: ExecutionConfig::default(),
         }
     }
 } 

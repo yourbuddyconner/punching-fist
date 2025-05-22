@@ -6,6 +6,8 @@ use sqlx::{
 };
 use std::str::FromStr;
 use uuid::Uuid;
+use std::fs;
+use tracing::info;
 
 use super::{
     AlertRecord, DatabaseConfig, Store, TaskRecord, TaskResources, TaskStatus,
@@ -19,13 +21,26 @@ pub struct SqliteStore {
 
 impl SqliteStore {
     pub async fn new(config: &DatabaseConfig) -> Result<Self> {
+        let path = config
+            .sqlite_path
+            .as_ref()
+            .ok_or_else(|| OperatorError::Config("SQLite path not configured".into()))?;
+
+        // Ensure the parent directory exists so SQLite can create the file.
+        if let Some(parent) = path.parent() {
+            if !parent.exists() {
+                fs::create_dir_all(parent)?;
+            }
+        }
+
+        info!("Opening SQLite database at {:?}", path);
+
         let options = SqliteConnectOptions::from_str(
-            config.sqlite_path
-                .as_ref()
-                .ok_or_else(|| OperatorError::Config("SQLite path not configured".into()))?
+            path
                 .to_str()
                 .ok_or_else(|| OperatorError::Config("Invalid SQLite path".into()))?
-        )?;
+        )?
+        .create_if_missing(true);
 
         let pool = SqlitePool::connect_with(options).await?;
         Ok(Self { pool })

@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum DatabaseType {
     Sqlite,
     Postgres,
@@ -9,6 +10,7 @@ pub enum DatabaseType {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DatabaseConfig {
+    #[serde(alias = "type")]
     pub db_type: DatabaseType,
     pub sqlite_path: Option<PathBuf>,
     pub postgres_url: Option<String>,
