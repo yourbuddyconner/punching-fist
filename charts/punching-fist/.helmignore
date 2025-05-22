@@ -1,0 +1,29 @@
+# Git
+.git
+.gitignore
+
+# Development
+target/
+Cargo.lock
+*.rs.bk
+
+# Documentation
+docs/
+*.md
+!README.md
+
+# CI/CD
+.github/
+.gitlab/
+.circleci/
+.travis.yml
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Misc
+.DS_Store
+*.log 

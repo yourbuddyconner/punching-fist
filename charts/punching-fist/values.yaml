@@ -1,0 +1,65 @@
+# Global settings
+global:
+  image:
+    repository: punching-fist
+    tag: latest
+    pullPolicy: IfNotPresent
+
+# Operator configuration
+operator:
+  replicaCount: 1
+  resources:
+    limits:
+      cpu: 500m
+      memory: 512Mi
+    requests:
+      cpu: 100m
+      memory: 128Mi
+
+# Server configuration
+server:
+  port: 8080
+  host: "0.0.0.0"
+
+# OpenHands configuration
+openhands:
+  enabled: true
+  apiKey: ""  # Set via --set or secret
+  model: "anthropic/claude-3-7-sonnet-20250219"
+
+# Prometheus configuration
+prometheus:
+  enabled: true
+  serviceMonitor:
+    enabled: true
+    interval: 15s
+
+# Security configuration
+security:
+  serviceAccount:
+    create: true
+    name: punching-fist
+  rbac:
+    create: true
+    rules:
+      - apiGroups: [""]
+        resources: ["pods", "services", "configmaps"]
+        verbs: ["get", "list", "watch", "create", "update", "delete"]
+      - apiGroups: ["batch"]
+        resources: ["jobs"]
+        verbs: ["get", "list", "watch", "create", "update", "delete"]
+
+# Pod security context
+podSecurityContext:
+  fsGroup: 1000
+  runAsUser: 1000
+  runAsNonRoot: true
+
+# Container security context
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  runAsNonRoot: true
+  capabilities:
+    drop:
+      - ALL 

@@ -1,0 +1,17 @@
+apiVersion: v2
+name: punching-fist
+description: A Kubernetes operator for AI-powered cluster maintenance
+type: application
+version: 0.1.0
+appVersion: "1.0.0"
+maintainers:
+  - name: Your Name
+    email: your.email@example.com
+keywords:
+  - kubernetes
+  - operator
+  - ai
+  - maintenance
+home: https://github.com/your-org/punching-fist-operator
+sources:
+  - https://github.com/your-org/punching-fist-operator 

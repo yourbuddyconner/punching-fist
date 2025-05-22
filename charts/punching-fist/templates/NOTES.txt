@@ -1,0 +1,14 @@
+Thank you for installing {{ .Chart.Name }}!
+
+Your release is named {{ .Release.Name }}.
+
+To verify that the operator is running:
+
+  kubectl get pods -n {{ .Release.Namespace }} -l app.kubernetes.io/name={{ .Chart.Name }}
+
+The operator is now listening for webhook alerts on port {{ .Values.server.port }} at the endpoint /webhook/alerts.
+
+To configure the operator, you can modify the values in your values.yaml file or use the --set flag with helm upgrade.
+
+For more information about the operator, visit:
+https://github.com/yourusername/punching-fist-operator 
