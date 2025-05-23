@@ -25,29 +25,35 @@ impl OpenHandsClient {
             ));
         }
 
-        // Check if Docker is available and working by running a simple command
-        let docker_check = std::process::Command::new("docker")
-            .arg("version")
-            .arg("--format")
-            .arg("{{.Server.Version}}")
-            .output();
+        // Only check Docker availability in Local execution mode
+        // In Kubernetes mode, Docker is only used as a fallback
+        if matches!(execution_mode, TaskExecutionMode::Local) {
+            // Check if Docker is available and working by running a simple command
+            let docker_check = std::process::Command::new("docker")
+                .arg("version")
+                .arg("--format")
+                .arg("{{.Server.Version}}")
+                .output();
 
-        match docker_check {
-            Ok(output) if output.status.success() => {
-                let docker_version = String::from_utf8_lossy(&output.stdout).trim().to_string();
-                tracing::info!("Docker is available, server version: {}", docker_version);
+            match docker_check {
+                Ok(output) if output.status.success() => {
+                    let docker_version = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                    tracing::info!("Docker is available, server version: {}", docker_version);
+                }
+                Ok(output) => {
+                    let error = String::from_utf8_lossy(&output.stderr).trim().to_string();
+                    return Err(OperatorError::Config(
+                        format!("Docker command failed: {}", error)
+                    ));
+                }
+                Err(e) => {
+                    return Err(OperatorError::Config(
+                        format!("Docker not found or not accessible: {}. Ensure Docker is installed and running.", e)
+                    ));
+                }
             }
-            Ok(output) => {
-                let error = String::from_utf8_lossy(&output.stderr).trim().to_string();
-                return Err(OperatorError::Config(
-                    format!("Docker command failed: {}", error)
-                ));
-            }
-            Err(e) => {
-                return Err(OperatorError::Config(
-                    format!("Docker not found or not accessible: {}. Ensure Docker is installed and running.", e)
-                ));
-            }
+        } else {
+            tracing::info!("Running in Kubernetes execution mode - Docker check skipped (will be used as fallback only)");
         }
 
         Ok(Self {

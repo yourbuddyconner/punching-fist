@@ -74,7 +74,7 @@ k8s-status:
 # View operator logs
 # Usage: `just k8s-logs`
 k8s-logs:
-    kubectl logs -f deployment/punching-fist -n punching-fist-system
+    kubectl logs -f statefulset/punching-fist -n punching-fist-system
 
 # Port forward to access the operator locally
 # Usage: `just k8s-port-forward`

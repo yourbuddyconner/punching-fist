@@ -13,6 +13,8 @@ use crate::{
 pub struct KubeClient {
     client: Client,
     namespace: String,
+    secret_name: String,
+    secret_key: String,
 }
 
 impl KubeClient {
@@ -23,9 +25,17 @@ impl KubeClient {
         
         let namespace = std::env::var("NAMESPACE").unwrap_or_else(|_| "default".to_string());
         
+        // Use environment variables or defaults that match our Helm chart
+        let secret_name = std::env::var("OPENHANDS_SECRET_NAME")
+            .unwrap_or_else(|_| "punching-fist-secrets".to_string());
+        let secret_key = std::env::var("OPENHANDS_SECRET_KEY")
+            .unwrap_or_else(|_| "openhands-api-key".to_string());
+        
         Ok(Self {
             client,
             namespace,
+            secret_name,
+            secret_key,
         })
     }
 
@@ -75,8 +85,8 @@ impl KubeClient {
                                     name: "LLM_API_KEY".to_string(),
                                     value_from: Some(k8s_openapi::api::core::v1::EnvVarSource {
                                         secret_key_ref: Some(k8s_openapi::api::core::v1::SecretKeySelector {
-                                            name: Some("openhands-secrets".to_string()),
-                                            key: "api-key".to_string(),
+                                            name: Some(self.secret_name.clone()),
+                                            key: self.secret_key.clone(),
                                             ..Default::default()
                                         }),
                                         ..Default::default()
@@ -96,6 +106,11 @@ impl KubeClient {
                                 k8s_openapi::api::core::v1::EnvVar {
                                     name: "SANDBOX_RUNTIME_CONTAINER_IMAGE".to_string(),
                                     value: Some("docker.all-hands.dev/all-hands-ai/runtime:0.39-nikolaik".to_string()),
+                                    ..Default::default()
+                                },
+                                k8s_openapi::api::core::v1::EnvVar {
+                                    name: "SANDBOX_USER_ID".to_string(),
+                                    value: Some("1001".to_string()),
                                     ..Default::default()
                                 },
                             ]),
@@ -128,6 +143,8 @@ impl KubeClient {
                             }),
                             security_context: Some(k8s_openapi::api::core::v1::SecurityContext {
                                 privileged: Some(true),
+                                run_as_user: Some(1001),
+                                run_as_non_root: Some(true),
                                 ..Default::default()
                             }),
                             ..Default::default()

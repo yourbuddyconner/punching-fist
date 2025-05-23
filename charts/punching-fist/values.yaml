@@ -27,6 +27,13 @@ openhands:
   apiKey: ""  # Set via --set or secret
   model: "anthropic/claude-3-7-sonnet-20250219"
 
+# Persistence configuration for SQLite database
+persistence:
+  enabled: true
+  size: 1Gi
+  storageClass: ""  # Use default storage class
+  accessMode: ReadWriteOnce
+
 # Prometheus configuration
 prometheus:
   enabled: true
@@ -58,7 +65,7 @@ podSecurityContext:
 # Container security context
 containerSecurityContext:
   allowPrivilegeEscalation: false
-  readOnlyRootFilesystem: true
+  readOnlyRootFilesystem: false  # Set to false to allow writing to mounted volumes
   runAsNonRoot: true
   capabilities:
     drop:
