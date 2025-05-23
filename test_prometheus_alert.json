@@ -1,0 +1,35 @@
+{
+  "version": "4",
+  "groupKey": "{}:{}",
+  "status": "firing",
+  "receiver": "web.hook",
+  "groupLabels": {},
+  "commonLabels": {
+    "alertname": "HighMemoryUsage",
+    "instance": "localhost:9090",
+    "job": "node-exporter"
+  },
+  "commonAnnotations": {
+    "description": "Memory usage is above 80%",
+    "summary": "High memory usage detected"
+  },
+  "externalURL": "http://localhost:9093",
+  "alerts": [
+    {
+      "status": "firing",
+      "labels": {
+        "alertname": "HighMemoryUsage",
+        "instance": "localhost:9090",
+        "job": "node-exporter"
+      },
+      "annotations": {
+        "description": "Memory usage is above 80%",
+        "summary": "High memory usage detected"
+      },
+      "startsAt": "2024-01-01T00:00:00Z",
+      "endsAt": "0001-01-01T00:00:00Z",
+      "generatorURL": "http://localhost:9090/graph?g0.expr=node_memory_usage_percent+%3E+80&g0.tab=1",
+      "fingerprint": "abc123"
+    }
+  ]
+} 

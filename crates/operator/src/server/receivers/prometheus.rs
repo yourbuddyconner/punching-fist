@@ -10,13 +10,19 @@ use super::traits::{Alert, AlertReceiver, Task, TaskResources};
 #[derive(Debug, Serialize, Deserialize)]
 pub struct PrometheusAlert {
     pub version: String,
+    #[serde(rename = "groupKey")]
     pub group_key: String,
+    #[serde(rename = "truncatedAlerts")]
     pub truncated_alerts: Option<i32>,
     pub status: String,
     pub receiver: String,
+    #[serde(rename = "groupLabels")]
     pub group_labels: HashMap<String, String>,
+    #[serde(rename = "commonLabels")]
     pub common_labels: HashMap<String, String>,
+    #[serde(rename = "commonAnnotations")]
     pub common_annotations: HashMap<String, String>,
+    #[serde(rename = "externalURL")]
     pub external_url: String,
     pub alerts: Vec<PrometheusAlertDetail>,
 }
@@ -26,8 +32,11 @@ pub struct PrometheusAlertDetail {
     pub status: String,
     pub labels: HashMap<String, String>,
     pub annotations: HashMap<String, String>,
+    #[serde(rename = "startsAt")]
     pub starts_at: DateTime<Utc>,
+    #[serde(rename = "endsAt")]
     pub ends_at: Option<DateTime<Utc>>,
+    #[serde(rename = "generatorURL")]
     pub generator_url: String,
     pub fingerprint: String,
 }

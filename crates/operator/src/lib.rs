@@ -21,8 +21,6 @@ pub enum OperatorError {
     Config(String),
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
-    #[error("YAML parsing error: {0}")]
-    Yaml(#[from] serde_yaml::Error),
     #[error("Database migration error: {0}")]
     Migrate(#[from] sqlx::migrate::MigrateError),
     #[error("SQLx error: {0}")]

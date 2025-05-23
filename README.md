@@ -46,7 +46,37 @@ helm install punching-fist punching-fist/punching-fist \
 
 ## Configuration
 
-The operator can be configured through a ConfigMap or environment variables:
+The operator is configured entirely through environment variables. For development, create a `.env` file in the project root (copy from `env.example`):
+
+```bash
+# Copy the example file
+cp env.example .env
+
+# Edit the values
+vim .env
+```
+
+### Environment Variables
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `SERVER_ADDR` | Server bind address | `0.0.0.0:8080` |
+| `KUBE_NAMESPACE` | Kubernetes namespace | `default` |
+| `KUBE_SERVICE_ACCOUNT` | Service account name | `punching-fist` |
+| `LLM_API_KEY` | LLM API key for OpenHands | (required) |
+| `LLM_MODEL` | Default LLM model for OpenHands | `anthropic/claude-3-5-sonnet-20241022` |
+| `EXECUTION_MODE` | Execution mode (`local` or `kubernetes`) | `local` |
+| `DATABASE_TYPE` | Database type (`sqlite` or `postgres`) | `sqlite` |
+| `SQLITE_PATH` | SQLite database path | `data/punching-fist.db` |
+| `DATABASE_URL` | PostgreSQL connection URL | (required for postgres) |
+| `DATABASE_MAX_CONNECTIONS` | Max database connections | `5` |
+| `RUST_LOG` | Logging level | `info` |
+
+**Note:** `LLM_API_KEY` is required for OpenHands AI functionality to work. This should be your LLM provider's API key (e.g., OpenAI, Anthropic, etc.).
+
+### Kubernetes ConfigMap and Secrets
+
+For production deployments, use ConfigMaps and Secrets:
 
 ```yaml
 apiVersion: v1

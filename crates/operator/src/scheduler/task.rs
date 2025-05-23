@@ -1,9 +1,9 @@
 use std::sync::Arc;
-use uuid::Uuid;
 use crate::{
     kubernetes::KubeClient,
     openhands::OpenHandsClient,
     server::Alert,
+    store::{Store, TaskRecord},
     Task,
     TaskMetrics,
     Result,
@@ -11,44 +11,42 @@ use crate::{
 };
 
 pub struct TaskScheduler {
-    kube_client: Arc<KubeClient>,
+    kube_client: Option<Arc<KubeClient>>,
     openhands_client: Arc<OpenHandsClient>,
+    store: Arc<dyn Store>,
     metrics: TaskMetrics,
     execution_mode: TaskExecutionMode,
 }
 
 impl TaskScheduler {
     pub fn new(
-        kube_client: Arc<KubeClient>,
+        kube_client: Option<Arc<KubeClient>>,
         openhands_client: Arc<OpenHandsClient>,
+        store: Arc<dyn Store>,
         execution_mode: TaskExecutionMode,
     ) -> Self {
         Self {
             kube_client,
             openhands_client,
+            store,
             metrics: TaskMetrics::default(),
             execution_mode,
         }
     }
 
-    pub async fn schedule_task(&mut self, alert: Alert) -> Result<()> {
+    pub async fn schedule_task(&mut self, _alert: Alert, task_record: TaskRecord) -> Result<()> {
+        // Convert TaskRecord to the Task format used by OpenHands client
         let task = Task {
-            id: Uuid::new_v4().to_string(),
-            prompt: format!(
-                "Handle the following Kubernetes alert: {}\nDescription: {}\nSeverity: {}\nLabels: {:?}",
-                alert.name,
-                alert.description,
-                alert.severity,
-                alert.labels
-            ),
-            model: None,
-            max_retries: Some(3),
-            timeout: Some(300),
+            id: task_record.id.to_string(),
+            prompt: task_record.prompt.clone(),
+            model: if task_record.model.is_empty() { None } else { Some(task_record.model.clone()) },
+            max_retries: Some(task_record.max_retries),
+            timeout: Some(task_record.timeout),
             resources: crate::TaskResources {
-                cpu_limit: "500m".to_string(),
-                memory_limit: "512Mi".to_string(),
-                cpu_request: "100m".to_string(),
-                memory_request: "128Mi".to_string(),
+                cpu_limit: task_record.resources.cpu_limit.clone(),
+                memory_limit: task_record.resources.memory_limit.clone(),
+                cpu_request: task_record.resources.cpu_request.clone(),
+                memory_request: task_record.resources.memory_request.clone(),
             },
         };
 
@@ -60,17 +58,22 @@ impl TaskScheduler {
                 // Execute directly in-process (optionally in its own task)
                 // Here we simply await the completion; callers may run the
                 // scheduler on a dedicated Tokio runtime/thread pool.
-                self.openhands_client.process_task(&task).await?;
+                self.openhands_client.process_task(&task, task_record.id).await?;
             }
             TaskExecutionMode::Kubernetes => {
                 // Try to offload to Kubernetes Job, fall back to local on
                 // failure (e.g. when running outside a cluster).
-                if let Err(k8s_err) = self.kube_client.create_task_job(&task).await {
-                    tracing::warn!(error = %k8s_err, "failed to create Job in Kubernetes – falling back to local headless execution");
+                if let Some(kube_client) = &self.kube_client {
+                    if let Err(k8s_err) = kube_client.create_task_job(&task).await {
+                        tracing::warn!(error = %k8s_err, "failed to create Job in Kubernetes – falling back to local headless execution");
 
-                    // Attempt local execution. Propagate any errors to the
-                    // caller so they can be tracked in metrics.
-                    self.openhands_client.process_task(&task).await?;
+                        // Attempt local execution. Propagate any errors to the
+                        // caller so they can be tracked in metrics.
+                        self.openhands_client.process_task(&task, task_record.id).await?;
+                    }
+                } else {
+                    tracing::warn!("Kubernetes execution mode requested but no Kubernetes client available – falling back to local execution");
+                    self.openhands_client.process_task(&task, task_record.id).await?;
                 }
             }
         }

@@ -1,5 +1,5 @@
 use async_trait::async_trait;
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use sqlx::{
     sqlite::{SqliteConnectOptions, SqlitePool},
     Row,
@@ -191,6 +191,27 @@ impl Store for SqliteStore {
         )
         .bind(status as i32)
         .bind(now)
+        .bind(id)
+        .execute(&self.pool)
+        .await?;
+
+        Ok(())
+    }
+
+    async fn update_task_completion(&self, id: Uuid, status: TaskStatus, started_at: Option<DateTime<Utc>>, completed_at: Option<DateTime<Utc>>, error: Option<String>) -> Result<()> {
+        let now = Utc::now();
+        sqlx::query(
+            r#"
+            UPDATE tasks
+            SET status = ?, updated_at = ?, started_at = ?, completed_at = ?, error = ?
+            WHERE id = ?
+            "#,
+        )
+        .bind(status as i32)
+        .bind(now)
+        .bind(started_at)
+        .bind(completed_at)
+        .bind(error)
         .bind(id)
         .execute(&self.pool)
         .await?;

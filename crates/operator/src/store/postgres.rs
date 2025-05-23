@@ -1,5 +1,5 @@
 use async_trait::async_trait;
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use sqlx::{
     postgres::{PgConnectOptions, PgPool},
     Row,
@@ -174,6 +174,27 @@ impl Store for PostgresStore {
         )
         .bind(status as i32)
         .bind(now)
+        .bind(id)
+        .execute(&self.pool)
+        .await?;
+
+        Ok(())
+    }
+
+    async fn update_task_completion(&self, id: Uuid, status: TaskStatus, started_at: Option<DateTime<Utc>>, completed_at: Option<DateTime<Utc>>, error: Option<String>) -> Result<()> {
+        let now = Utc::now();
+        sqlx::query(
+            r#"
+            UPDATE tasks
+            SET status = $1, updated_at = $2, started_at = $3, completed_at = $4, error = $5
+            WHERE id = $6
+            "#,
+        )
+        .bind(status as i32)
+        .bind(now)
+        .bind(started_at)
+        .bind(completed_at)
+        .bind(error)
         .bind(id)
         .execute(&self.pool)
         .await?;

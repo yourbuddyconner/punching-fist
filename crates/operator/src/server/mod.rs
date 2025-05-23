@@ -41,6 +41,7 @@ impl Server {
             .route("/health", get(routes::health_check))
             .route("/metrics", get(routes::metrics))
             .route("/alerts", post(routes::alert_handler))
+            .route("/alerts/prometheus", post(routes::prometheus_alert_handler))
             .with_state(Arc::new(ServerState {
                 scheduler: self.scheduler.clone(),
                 receiver: self.receiver.clone(),

@@ -72,6 +72,7 @@ pub trait Store: Send + Sync {
     async fn save_task(&self, task: TaskRecord) -> crate::Result<()>;
     async fn get_task(&self, id: Uuid) -> crate::Result<Option<TaskRecord>>;
     async fn update_task_status(&self, id: Uuid, status: TaskStatus) -> crate::Result<()>;
+    async fn update_task_completion(&self, id: Uuid, status: TaskStatus, started_at: Option<DateTime<Utc>>, completed_at: Option<DateTime<Utc>>, error: Option<String>) -> crate::Result<()>;
     async fn list_tasks(&self, limit: i64, offset: i64) -> crate::Result<Vec<TaskRecord>>;
     async fn list_alerts(&self, limit: i64, offset: i64) -> crate::Result<Vec<AlertRecord>>;
 } 

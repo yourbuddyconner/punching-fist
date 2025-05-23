@@ -46,5 +46,11 @@ Thumbs.db
 # Logs
 *.log
 
-# By-products of [Rrustdoc
+# Environment files
+.env
+.env.local
+.env.development
+.env.production
+
+# By-products of [Rrustdoc
 /doc/ 
