@@ -1,0 +1,70 @@
+# Local development values for punching-fist operator
+# Use this file for local Kubernetes deployment with: helm install --values values-local.yaml
+
+# Global settings for local development
+global:
+  image:
+    repository: punching-fist
+    tag: latest
+    pullPolicy: Never  # Use local images only
+
+# Operator configuration
+operator:
+  replicaCount: 1
+  resources:
+    limits:
+      cpu: 500m
+      memory: 512Mi
+    requests:
+      cpu: 100m
+      memory: 128Mi
+
+# Server configuration
+server:
+  port: 8080
+  host: "0.0.0.0"
+
+# OpenHands configuration
+openhands:
+  enabled: true
+  apiKey: ""  # Set via --set openhands.apiKey=your_key or use deploy-local-with-key command
+  model: "anthropic/claude-3-5-sonnet-20241022"
+
+# Prometheus configuration
+prometheus:
+  enabled: true
+  serviceMonitor:
+    enabled: false  # Disable for local development unless you have prometheus operator
+
+# Security configuration
+security:
+  serviceAccount:
+    create: true
+    name: punching-fist
+  rbac:
+    create: true
+    rules:
+      - apiGroups: [""]
+        resources: ["pods", "services", "configmaps", "secrets"]
+        verbs: ["get", "list", "watch", "create", "update", "delete"]
+      - apiGroups: ["batch"]
+        resources: ["jobs"]
+        verbs: ["get", "list", "watch", "create", "update", "delete"]
+      - apiGroups: ["apps"]
+        resources: ["deployments", "replicasets"]
+        verbs: ["get", "list", "watch"]
+
+# Pod security context
+podSecurityContext:
+  fsGroup: 1000
+  runAsUser: 1000
+  runAsNonRoot: true
+
+# Container security context  
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: false  # Changed to false for local development
+  runAsNonRoot: true
+  capabilities:
+    drop:
+      - ALL 

@@ -1,5 +1,5 @@
 # Build stage
-FROM rust:1.70-slim as builder
+FROM rust:1.84-slim as builder
 
 WORKDIR /usr/src/punching-fist-operator
 
@@ -28,8 +28,8 @@ RUN apt-get update && \
 COPY --from=builder /usr/src/punching-fist-operator/target/release/punching-fist-operator .
 
 # Create non-root user
-RUN useradd -m -u 1000 operator
-USER operator
+RUN useradd -m -u 1000 appuser
+USER appuser
 
 # Expose the WebSocket port
 EXPOSE 8080
