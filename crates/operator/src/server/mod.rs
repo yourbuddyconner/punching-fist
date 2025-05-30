@@ -12,6 +12,7 @@ use tower_http::trace::TraceLayer;
 use crate::{
     config::Config,
     scheduler::TaskScheduler,
+    sources::WebhookHandler,
     store::Store,
     // Removed old imports: AlertRecord, TaskRecord, TaskStatus
 };
@@ -21,11 +22,17 @@ pub use receivers::{Alert, PrometheusReceiver};
 pub struct Server {
     scheduler: Arc<Mutex<TaskScheduler>>,
     store: Arc<dyn Store>,
+    pub webhook_handler: Arc<WebhookHandler>,
 }
 
 impl Server {
-    pub fn new(_config: &Config, scheduler: Arc<Mutex<TaskScheduler>>, store: Arc<dyn Store>) -> Self {
-        Self { scheduler, store }
+    pub fn new(
+        _config: &Config, 
+        scheduler: Arc<Mutex<TaskScheduler>>, 
+        store: Arc<dyn Store>,
+        webhook_handler: Arc<WebhookHandler>,
+    ) -> Self {
+        Self { scheduler, store, webhook_handler }
     }
 
     pub fn build_router(self) -> Router {
@@ -40,7 +47,7 @@ impl Server {
             //.route("/tasks", post(routes::create_task))
             //.route("/tasks/:id", get(routes::get_task))
             //.route("/tasks", get(routes::list_tasks))
-            .route("/webhook/alerts", post(routes::webhook_alerts))
+            .route("/webhook/*path", post(routes::webhook_alerts))
             .route("/metrics", get(routes::metrics))
             .layer(TraceLayer::new_for_http())
             .with_state(state)

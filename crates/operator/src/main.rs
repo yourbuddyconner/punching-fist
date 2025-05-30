@@ -5,10 +5,12 @@ use tracing::info;
 // becomes:
 use punching_fist_operator::{
     config::{Config, TaskExecutionMode},
+    controllers::SourceController,
     kubernetes::KubeClient,
     openhands::OpenHandsClient,
     scheduler::TaskScheduler,
     server::Server,
+    sources::WebhookHandler,
     store::{self, create_store},
     Result,
 };
@@ -58,6 +60,11 @@ async fn main() -> Result<()> {
     }
     info!("Database initialized successfully");
 
+    // Initialize WebhookHandler for Phase 1
+    info!("Initializing webhook handler...");
+    let webhook_handler = Arc::new(WebhookHandler::new(store.clone()));
+    info!("Webhook handler initialized successfully");
+
     // Initialize KubeClient only if we're in Kubernetes execution mode
     let kube_client = match config.execution.mode {
         TaskExecutionMode::Kubernetes => {
@@ -78,6 +85,24 @@ async fn main() -> Result<()> {
             None
         }
     };
+
+    // Initialize Kubernetes client for CRD controllers if in Kubernetes mode
+    if config.execution.mode == TaskExecutionMode::Kubernetes {
+        info!("Initializing Source controller...");
+        let k8s_client = kube::Client::try_default().await
+            .map_err(|e| punching_fist_operator::OperatorError::Kubernetes(e))?;
+        
+        let source_controller = SourceController::new(k8s_client, webhook_handler.clone());
+        
+        // Spawn the controller in a separate task
+        tokio::spawn(async move {
+            if let Err(e) = source_controller.run().await {
+                tracing::error!("Source controller error: {}", e);
+            }
+        });
+        
+        info!("Source controller started successfully");
+    }
 
     // Initialize OpenHandsClient (will be replaced in Phase 1 with LLM agent runtime)
     info!("Initializing OpenHands client...");
@@ -104,7 +129,7 @@ async fn main() -> Result<()> {
 
     // Initialize server
     info!("Initializing HTTP server...");
-    let server = Server::new(&config, scheduler.clone(), store.clone());
+    let server = Server::new(&config, scheduler.clone(), store.clone(), webhook_handler.clone());
     let app = server.build_router();
 
     // Start server

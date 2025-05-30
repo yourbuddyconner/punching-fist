@@ -7,10 +7,12 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use uuid::Uuid;
+use tracing::{info, error};
 
 use crate::{
     server::Server,
     store::{self, Store},
+    sources::webhook::AlertManagerWebhook,
     // Removed old imports that don't exist anymore
 };
 
@@ -61,11 +63,32 @@ pub async fn list_alerts(
 }
 
 pub async fn webhook_alerts(
-    State(_server): State<Arc<Server>>,
-    Json(_payload): Json<serde_json::Value>,
+    State(server): State<Arc<Server>>,
+    Path(path): Path<String>,
+    Json(payload): Json<AlertManagerWebhook>,
 ) -> impl IntoResponse {
-    // TODO: Implement for Phase 1 - this will be the main AlertManager webhook handler
-    (StatusCode::NOT_IMPLEMENTED, "Webhook handler not yet implemented")
+    info!("Received AlertManager webhook on path: /{}", path);
+    
+    // Get webhook configuration for this path
+    let webhook_config = match server.webhook_handler.get_webhook_config(&path).await {
+        Some(config) => config,
+        None => {
+            error!("No webhook configured for path: /{}", path);
+            return (StatusCode::NOT_FOUND, "Webhook path not configured");
+        }
+    };
+
+    // Process the webhook
+    match server.webhook_handler.handle_alertmanager_webhook(&webhook_config, payload).await {
+        Ok(alert_ids) => {
+            info!("Successfully processed {} alerts", alert_ids.len());
+            (StatusCode::OK, "Alerts processed successfully")
+        }
+        Err(e) => {
+            error!("Failed to process webhook: {}", e);
+            (StatusCode::INTERNAL_SERVER_ERROR, "Failed to process alerts")
+        }
+    }
 }
 
 pub async fn metrics() -> impl IntoResponse {

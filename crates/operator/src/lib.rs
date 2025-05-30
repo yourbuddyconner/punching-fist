@@ -1,5 +1,7 @@
 pub mod config;
+pub mod controllers;
 pub mod crd;
+pub mod sources;
 pub mod store;
 pub mod server;
 pub mod kubernetes;
