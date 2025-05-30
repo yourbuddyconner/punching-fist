@@ -1,13 +1,13 @@
 mod config;
-mod models;
-mod sqlite;
-mod postgres;
+pub mod models;
+pub mod postgres;
+pub mod sqlite;
 mod factory;
 
 pub use config::{DatabaseConfig, DatabaseType};
 pub use models::*;
-pub use sqlite::SqliteStore;
-pub use postgres::PostgresStore;
+pub use self::postgres::PostgresStore;
+pub use self::sqlite::SqliteStore;
 pub use factory::create_store;
 
 use async_trait::async_trait;

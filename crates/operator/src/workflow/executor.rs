@@ -14,6 +14,7 @@ use futures::{StreamExt, TryStreamExt};
 use crate::{
     crd::{WorkflowStep, StepType},
     workflow::WorkflowContext,
+    agent::{AgentRuntime, LLMConfig, tools::{kubectl::KubectlTool, promql::PromQLTool, curl::CurlTool, script::ScriptTool}},
     Result, Error,
 };
 
@@ -128,20 +129,122 @@ impl StepExecutor {
         let goal = step.goal.as_ref()
             .ok_or_else(|| Error::Validation("Agent step missing goal".to_string()))?;
 
-        // For Week 4, we'll create a placeholder that shows what will happen
-        // Week 5 will implement the actual LLM agent runtime
+        // Get LLM config from context or use defaults
+        let llm_config = if let Some(config_value) = context.get_metadata("llm_config") {
+            serde_json::from_value(config_value.clone())
+                .unwrap_or_else(|_| LLMConfig::default())
+        } else {
+            LLMConfig::default()
+        };
+
+        // Create agent runtime
+        let mut agent_runtime = AgentRuntime::new(llm_config)
+            .map_err(|e| Error::Internal(format!("Failed to create agent runtime: {}", e)))?;
+
+        // Add tools based on step configuration
+        if !step.tools.is_empty() {
+            for tool in &step.tools {
+                // Extract tool name from the Tool enum
+                let tool_name = match tool {
+                    crate::crd::Tool::Named(name) => name.as_str(),
+                    crate::crd::Tool::Detailed(detailed) => detailed.name.as_str(),
+                };
+                
+                match tool_name {
+                    "kubectl" => {
+                        let kubectl_tool = KubectlTool::new(self.client.clone());
+                        agent_runtime.add_tool("kubectl".to_string(), Arc::new(kubectl_tool));
+                    }
+                    "promql" => {
+                        let prometheus_url = context.get_metadata("prometheus_url")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("http://prometheus:9090")
+                            .to_string();
+                        let promql_tool = PromQLTool::new(prometheus_url);
+                        agent_runtime.add_tool("promql".to_string(), Arc::new(promql_tool));
+                    }
+                    "curl" => {
+                        let curl_tool = CurlTool::new();
+                        agent_runtime.add_tool("curl".to_string(), Arc::new(curl_tool));
+                    }
+                    "script" => {
+                        let script_tool = ScriptTool::new();
+                        agent_runtime.add_tool("script".to_string(), Arc::new(script_tool));
+                    }
+                    _ => {
+                        warn!("Unknown tool requested: {}", tool_name);
+                    }
+                }
+            }
+        }
+
+        // Build investigation context
+        let mut investigation_context = std::collections::HashMap::new();
         
-        warn!("Agent step execution not yet implemented (coming in Week 5)");
+        // Add alert context if available
+        if let Some(alert_name) = context.get_metadata("alert_name").and_then(|v| v.as_str()) {
+            investigation_context.insert("alert_name".to_string(), alert_name.to_string());
+        }
+        if let Some(severity) = context.get_metadata("severity").and_then(|v| v.as_str()) {
+            investigation_context.insert("severity".to_string(), severity.to_string());
+        }
         
-        Ok(StepResult {
-            output: serde_json::json!({
-                "message": "Agent step placeholder - will be implemented in Week 5",
-                "goal": goal,
-                "tools": step.tools,
-                "max_iterations": step.max_iterations,
-            }),
-            success: true,
-        })
+        // Add step inputs to context
+        if let Some(inputs) = context.get_template_context().get("input").and_then(|v| v.as_object()) {
+            for (key, value) in inputs {
+                if let Some(str_value) = value.as_str() {
+                    investigation_context.insert(key.clone(), str_value.to_string());
+                }
+            }
+        }
+
+        // Render goal with template values
+        let rendered_goal = self.render_template(goal, context)?;
+
+        // Execute investigation with timeout
+        let timeout_duration = Duration::from_secs(step.timeout_minutes.unwrap_or(10) as u64 * 60);
+        match timeout(timeout_duration, agent_runtime.investigate(&rendered_goal, investigation_context)).await {
+            Ok(Ok(agent_result)) => {
+                info!("Agent step {} completed successfully", step.name);
+                
+                // Convert agent result to step result
+                Ok(StepResult {
+                    output: serde_json::json!({
+                        "summary": agent_result.summary,
+                        "findings": agent_result.findings,
+                        "root_cause": agent_result.root_cause,
+                        "confidence": agent_result.confidence,
+                        "actions_taken": agent_result.actions_taken,
+                        "recommendations": agent_result.recommendations,
+                        "can_auto_fix": agent_result.can_auto_fix,
+                        "fix_command": agent_result.fix_command,
+                        "escalation_notes": agent_result.escalation_notes,
+                        "report": agent_result.format_report(),
+                    }),
+                    success: true,
+                })
+            }
+            Ok(Err(e)) => {
+                error!("Agent step {} failed: {}", step.name, e);
+                Ok(StepResult {
+                    output: serde_json::json!({
+                        "error": e.to_string(),
+                        "goal": rendered_goal,
+                    }),
+                    success: false,
+                })
+            }
+            Err(_) => {
+                error!("Agent step {} timed out", step.name);
+                Ok(StepResult {
+                    output: serde_json::json!({
+                        "error": "Agent investigation timed out",
+                        "goal": rendered_goal,
+                    }),
+                    success: false,
+                })
+            }
+        }
     }
 
     async fn execute_conditional_step(

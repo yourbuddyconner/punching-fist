@@ -8,6 +8,7 @@ pub mod server;
 pub mod openhands;
 pub mod scheduler;
 pub mod workflow;
+pub mod agent;
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
