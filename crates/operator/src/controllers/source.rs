@@ -1,30 +1,25 @@
 use std::sync::Arc;
-use kube::{
-    Api, Client, 
-    api::{Patch, PatchParams},
-    runtime::{
-        controller::{Action, Controller},
-        events::{Recorder, Event, EventType},
-        watcher::Config,
-    },
-    ResourceExt,
-};
-use futures::StreamExt;
 use std::time::Duration;
-use tracing::{error, info, warn};
-use tokio::sync::RwLock;
+use std::collections::HashMap;
+
+use futures::StreamExt;
+use kube::{
+    api::{Api, Patch, PatchParams, ResourceExt},
+    runtime::{controller::{Action, Controller}, watcher::Config},
+    Client,
+};
 use serde_json::json;
+use tracing::{error, info, warn};
 
 use crate::{
     crd::source::{Source, SourceStatus, Condition},
     sources::WebhookHandler,
-    Result, OperatorError,
+    Result, Error,
 };
 
 pub struct SourceController {
     client: Client,
     webhook_handler: Arc<WebhookHandler>,
-    sources: Arc<RwLock<std::collections::HashMap<String, Source>>>,
 }
 
 impl SourceController {
@@ -32,22 +27,21 @@ impl SourceController {
         Self {
             client,
             webhook_handler,
-            sources: Arc::new(RwLock::new(std::collections::HashMap::new())),
         }
     }
 
-    pub async fn run(self) -> Result<()> {
+    pub async fn run(self: Arc<Self>) -> Result<()> {
         info!("Starting Source controller");
 
-        let api = Api::<Source>::all(self.client.clone());
-        let config = Config::default();
-
-        Controller::new(api, config)
-            .run(Self::reconcile, Self::error_policy, Arc::new(self))
+        let sources: Api<Source> = Api::all(self.client.clone());
+        let sources_watcher = Config::default();
+        
+        Controller::new(sources, sources_watcher)
+            .run(Self::reconcile, Self::error_policy, self)
             .for_each(|res| async move {
                 match res {
-                    Ok(o) => info!("Reconciled: {:?}", o),
-                    Err(e) => error!("Reconcile error: {:?}", e),
+                    Ok((_source, _action)) => {}
+                    Err(e) => error!("Reconciliation error: {}", e),
                 }
             })
             .await;
@@ -61,12 +55,6 @@ impl SourceController {
 
         info!("Reconciling Source: {}/{}", namespace, name);
 
-        // Update our internal cache
-        {
-            let mut sources = ctx.sources.write().await;
-            sources.insert(source.name_any(), source.as_ref().clone());
-        }
-
         // Process based on source type
         match &source.spec.source_type {
             crate::crd::source::SourceType::Webhook => {
@@ -77,6 +65,7 @@ impl SourceController {
                         &webhook_config.path,
                         webhook_config.filters.clone(),
                         source.spec.trigger_workflow.clone(),
+                        Some(source.spec.trigger_workflow.clone()),
                     ).await?;
                 }
             }
@@ -116,20 +105,12 @@ impl SourceController {
         Ok(Action::requeue(Duration::from_secs(300))) // Requeue every 5 minutes
     }
 
-    fn error_policy(source: Arc<Source>, err: &OperatorError, _ctx: Arc<Self>) -> Action {
+    fn error_policy(source: Arc<Source>, err: &Error, _ctx: Arc<Self>) -> Action {
         error!("Error processing Source {}: {}", source.name_any(), err);
         Action::requeue(Duration::from_secs(60))
     }
 
     pub async fn get_source_by_webhook_path(&self, path: &str) -> Option<Source> {
-        let sources = self.sources.read().await;
-        for source in sources.values() {
-            if let crate::crd::source::SourceConfig::Webhook(webhook_config) = &source.spec.config {
-                if webhook_config.path == path {
-                    return Some(source.clone());
-                }
-            }
-        }
         None
     }
 } 

@@ -4,9 +4,10 @@ pub mod crd;
 pub mod sources;
 pub mod store;
 pub mod server;
-pub mod kubernetes;
+// pub mod kubernetes;  // Old KubeClient - replaced with kube::Client
 pub mod openhands;
 pub mod scheduler;
+pub mod workflow;
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -14,9 +15,9 @@ use thiserror::Error;
 use uuid;
 
 #[derive(Debug, Error)]
-pub enum OperatorError {
+pub enum Error {
     #[error("Kubernetes error: {0}")]
-    Kubernetes(#[from] kube::Error),
+    Kubernetes(String),
     #[error("OpenHands error: {0}")]
     OpenHands(String),
     #[error("Task error: {0}")]
@@ -33,9 +34,15 @@ pub enum OperatorError {
     SerdeJson(#[from] serde_json::Error),
     #[error("UUID error: {0}")]
     Uuid(#[from] uuid::Error),
+    #[error("Internal error: {0}")]
+    Internal(String),
+    #[error("Validation error: {0}")]
+    Validation(String),
+    #[error("Execution error: {0}")]
+    Execution(String),
 }
 
-pub type Result<T> = std::result::Result<T, OperatorError>;
+pub type Result<T> = std::result::Result<T, Error>;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Task {

@@ -1,21 +1,21 @@
-use super::{DatabaseConfig, DatabaseType, Store};
-use crate::Result;
+use crate::store::{DatabaseConfig, DatabaseType, SqliteStore, PostgresStore, Store};
 use std::sync::Arc;
 
-pub async fn create_store(config: &DatabaseConfig) -> Result<Arc<dyn Store>> {
+pub async fn create_store(config: &DatabaseConfig) -> crate::Result<Arc<dyn Store>> {
     match config.db_type {
         DatabaseType::Sqlite => {
-            let database_url = format!("sqlite:{}", config.sqlite_path.as_ref()
-                .ok_or_else(|| crate::OperatorError::Config("SQLite path not configured".into()))?
-                .display());
-            let store = super::SqliteStore::new(&database_url).await?;
-            Ok(Arc::new(store))
+            let path = config.sqlite_path
+                .as_ref()
+                .ok_or_else(|| crate::Error::Config("SQLite path not configured".into()))?
+                .to_str()
+                .unwrap_or("data/punching-fist.db");
+            Ok(Arc::new(SqliteStore::new(path).await?))
         },
         DatabaseType::Postgres => {
-            let connection_string = config.connection_string.as_ref()
-                .ok_or_else(|| crate::OperatorError::Config("PostgreSQL connection string not configured".into()))?;
-            let store = super::PostgresStore::new(connection_string).await?;
-            Ok(Arc::new(store))
+            let connection_string = config.connection_string
+                .as_ref()
+                .ok_or_else(|| crate::Error::Config("PostgreSQL connection string not configured".into()))?;
+            Ok(Arc::new(PostgresStore::new(connection_string).await?))
         },
     }
 } 

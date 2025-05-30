@@ -2,16 +2,18 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use serde::{Deserialize, Serialize};
-use tracing::{info, warn, error};
+use tracing::{info, warn};
 use uuid::Uuid;
 use chrono::{DateTime, Utc};
+use kube::Client;
 
 use crate::{
     store::{
-        Store,
-        Alert, AlertStatus, AlertSeverity, SourceEvent, SourceType,
+        Alert, AlertStatus, AlertSeverity, Store, SourceEvent, SourceType,
     },
-    Result, OperatorError,
+    Result,
+    crd::Workflow,
+    workflow::WorkflowEngine,
 };
 
 #[derive(Debug, Clone)]
@@ -20,11 +22,14 @@ pub struct WebhookConfig {
     pub path: String,
     pub filters: HashMap<String, Vec<String>>,
     pub workflow_name: String,
+    pub trigger_workflow: Option<String>,
 }
 
 pub struct WebhookHandler {
     store: Arc<dyn Store>,
-    registered_webhooks: Arc<RwLock<HashMap<String, WebhookConfig>>>,
+    client: Client,
+    webhook_configs: Arc<RwLock<HashMap<String, WebhookConfig>>>,
+    workflow_engine: Option<Arc<WorkflowEngine>>,
 }
 
 // AlertManager webhook payload structures
@@ -61,11 +66,18 @@ pub struct AlertManagerAlert {
 }
 
 impl WebhookHandler {
-    pub fn new(store: Arc<dyn Store>) -> Self {
+    pub fn new(store: Arc<dyn Store>, client: Client) -> Self {
         Self {
             store,
-            registered_webhooks: Arc::new(RwLock::new(HashMap::new())),
+            client,
+            webhook_configs: Arc::new(RwLock::new(HashMap::new())),
+            workflow_engine: None,
         }
+    }
+
+    pub fn with_workflow_engine(mut self, engine: Arc<WorkflowEngine>) -> Self {
+        self.workflow_engine = Some(engine);
+        self
     }
 
     pub async fn register_webhook(
@@ -74,14 +86,16 @@ impl WebhookHandler {
         path: &str,
         filters: HashMap<String, Vec<String>>,
         workflow_name: String,
+        trigger_workflow: Option<String>,
     ) -> Result<()> {
-        let mut webhooks = self.registered_webhooks.write().await;
+        let mut webhooks = self.webhook_configs.write().await;
         
         let config = WebhookConfig {
             source_name: source_name.to_string(),
             path: path.to_string(),
             filters,
             workflow_name,
+            trigger_workflow,
         };
 
         info!("Registered webhook for source {} at path {}", source_name, path);
@@ -91,7 +105,7 @@ impl WebhookHandler {
     }
 
     pub async fn get_webhook_config(&self, path: &str) -> Option<WebhookConfig> {
-        let webhooks = self.registered_webhooks.read().await;
+        let webhooks = self.webhook_configs.read().await;
         webhooks.get(path).cloned()
     }
 
@@ -183,7 +197,7 @@ impl WebhookHandler {
                 source_name: webhook_config.source_name.clone(),
                 source_type: SourceType::Webhook,
                 event_data: serde_json::to_value(&alert)?,
-                workflow_triggered: Some(webhook_config.workflow_name.clone()),
+                workflow_triggered: webhook_config.trigger_workflow.clone(),
                 received_at: Utc::now(),
             };
 
@@ -228,5 +242,47 @@ impl WebhookHandler {
         } else {
             AlertSeverity::Warning
         }
+    }
+
+    async fn trigger_workflow(&self, workflow_name: &str, alert: &Alert) -> Result<()> {
+        info!("Triggering workflow {} for alert {}", workflow_name, alert.id);
+        
+        // Get workflow from Kubernetes
+        let api: kube::Api<Workflow> = kube::Api::all(self.client.clone());
+        
+        let workflow = api.get(workflow_name).await
+            .map_err(|e| crate::Error::Kubernetes(format!("Failed to get workflow {}: {}", workflow_name, e)))?;
+        
+        // Queue workflow for execution if we have an engine
+        if let Some(engine) = &self.workflow_engine {
+            // Create a workflow instance with alert context
+            let mut workflow_instance = workflow.clone();
+            
+            // Add alert context to workflow metadata (will be passed to context)
+            if workflow_instance.metadata.annotations.is_none() {
+                workflow_instance.metadata.annotations = Some(Default::default());
+            }
+            workflow_instance.metadata.annotations.as_mut().unwrap().insert(
+                "alert.id".to_string(),
+                alert.id.to_string(),
+            );
+            workflow_instance.metadata.annotations.as_mut().unwrap().insert(
+                "alert.name".to_string(),
+                alert.alert_name.clone(),
+            );
+            workflow_instance.metadata.annotations.as_mut().unwrap().insert(
+                "alert.severity".to_string(),
+                format!("{:?}", alert.severity),
+            );
+            
+            engine.queue_workflow(workflow_instance).await?;
+            
+            // Update alert with workflow ID
+            self.store.update_alert_timing(alert.id, "triage_started_at", chrono::Utc::now()).await?;
+        } else {
+            warn!("Workflow engine not available, cannot trigger workflow");
+        }
+        
+        Ok(())
     }
 } 

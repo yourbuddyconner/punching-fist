@@ -11,6 +11,10 @@ description.workspace = true
 name = "generate-crds"
 path = "src/bin/generate_crds.rs"
 
+[features]
+default = ["server"]
+server = []
+
 [dependencies]
 # Web framework
 axum.workspace = true
@@ -59,6 +63,9 @@ uuid.workspace = true
 
 # Hashing
 sha2 = "0.10"
+
+# Regex
+regex = "1.10"
 
 [dev-dependencies]
 tokio-test.workspace = true

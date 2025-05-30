@@ -1,17 +1,18 @@
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
-use serde_json::Value as JsonValue;
-use sqlx::{Pool, Postgres, PgPool};
+use sqlx::{postgres::PgPool, Pool, Postgres};
 use tracing::{error, info};
 use uuid::Uuid;
+use std::collections::HashMap;
+use serde_json::Value as JsonValue;
 
 use crate::{
     store::{
-        Alert, AlertSeverity, AlertStatus, CustomResource, DeduplicationResult, 
-        SinkOutput, SinkStatus, SinkType, SourceEvent, SourceType, StepStatus, 
-        StepType, Store, Workflow, WorkflowStatus, WorkflowStep,
+        Alert, AlertStatus, CustomResource, DeduplicationResult, 
+        SinkOutput, SinkStatus, SourceEvent, StepStatus, 
+        Store, Workflow, WorkflowStatus, WorkflowStep,
     },
-    OperatorError, Result,
+    Error, Result,
 };
 
 pub struct PostgresStore {
@@ -26,7 +27,7 @@ impl PostgresStore {
             .await
             .map_err(|e| {
                 error!("Failed to connect to PostgreSQL: {}", e);
-                OperatorError::Sqlx(e)
+                Error::Sqlx(e)
             })?;
         
         Ok(Self { pool })
@@ -43,7 +44,7 @@ impl Store for PostgresStore {
             .await
             .map_err(|e| {
                 error!("Failed to run migrations: {}", e);
-                OperatorError::Migrate(e)
+                Error::Migrate(e)
             })?;
         
         Ok(())

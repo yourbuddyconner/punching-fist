@@ -1,18 +1,17 @@
 use std::sync::Arc;
 use std::sync::Mutex;
-use tracing::info;
+use tracing::{info, warn};
 
-// becomes:
 use punching_fist_operator::{
     config::{Config, TaskExecutionMode},
-    controllers::SourceController,
-    kubernetes::KubeClient,
+    controllers::{SourceController, WorkflowController},
     openhands::OpenHandsClient,
     scheduler::TaskScheduler,
     server::Server,
     sources::WebhookHandler,
-    store::{self, create_store},
-    Result,
+    store::create_store,
+    workflow::{WorkflowEngine, StepExecutor},
+    Result, Error,
 };
 
 #[tokio::main]
@@ -60,48 +59,83 @@ async fn main() -> Result<()> {
     }
     info!("Database initialized successfully");
 
-    // Initialize WebhookHandler for Phase 1
-    info!("Initializing webhook handler...");
-    let webhook_handler = Arc::new(WebhookHandler::new(store.clone()));
-    info!("Webhook handler initialized successfully");
-
-    // Initialize KubeClient only if we're in Kubernetes execution mode
+    // Initialize Kubernetes client if in Kubernetes mode
+    info!("Initializing Kubernetes client...");
     let kube_client = match config.execution.mode {
         TaskExecutionMode::Kubernetes => {
             info!("Initializing Kubernetes client for cluster execution");
-            match KubeClient::new().await {
+            match kube::Client::try_default().await {
                 Ok(client) => {
                     info!("Successfully initialized Kubernetes client");
-                    Some(Arc::new(client))
+                    client
                 }
                 Err(e) => {
                     tracing::error!("Failed to initialize Kubernetes client: {}", e);
-                    return Err(e);
+                    return Err(Error::Kubernetes(e.to_string()));
                 }
             }
         }
         TaskExecutionMode::Local => {
-            info!("Running in local execution mode, skipping Kubernetes client initialization");
-            None
+            info!("Running in local execution mode, creating in-cluster client anyway for CRD access");
+            // Even in local mode, we need a kube client for CRD operations
+            match kube::Client::try_default().await {
+                Ok(client) => client,
+                Err(e) => {
+                    warn!("Failed to initialize Kubernetes client in local mode: {}. Some features may not work.", e);
+                    // Create a dummy client or handle this case appropriately
+                    return Err(Error::Kubernetes(format!("Kubernetes client required even in local mode: {}", e)));
+                }
+            }
         }
     };
 
-    // Initialize Kubernetes client for CRD controllers if in Kubernetes mode
-    if config.execution.mode == TaskExecutionMode::Kubernetes {
-        info!("Initializing Source controller...");
-        let k8s_client = kube::Client::try_default().await
-            .map_err(|e| punching_fist_operator::OperatorError::Kubernetes(e))?;
-        
-        let source_controller = SourceController::new(k8s_client, webhook_handler.clone());
-        
-        // Spawn the controller in a separate task
-        tokio::spawn(async move {
-            if let Err(e) = source_controller.run().await {
-                tracing::error!("Source controller error: {}", e);
-            }
-        });
-        
-        info!("Source controller started successfully");
+    // Create workflow engine components
+    let step_executor = Arc::new(StepExecutor::new(
+        kube_client.clone(), 
+        config.kube.namespace.clone()
+    ));
+    let workflow_engine = Arc::new(WorkflowEngine::new(store.clone(), step_executor));
+    
+    // Create webhook handler with workflow engine
+    let webhook_handler = Arc::new(
+        WebhookHandler::new(store.clone(), kube_client.clone())
+            .with_workflow_engine(workflow_engine.clone())
+    );
+
+    // Start workflow engine
+    workflow_engine.clone().start().await;
+
+    // In Kubernetes mode, start controllers
+    match config.execution.mode {
+        TaskExecutionMode::Kubernetes => {
+            info!("Starting in Kubernetes mode");
+            
+            // Start source controller
+            let source_controller = Arc::new(SourceController::new(
+                kube_client.clone(),
+                webhook_handler.clone(),
+            ));
+            let controller = source_controller.clone();
+            tokio::spawn(async move {
+                if let Err(e) = controller.run().await {
+                    tracing::error!("Source controller error: {}", e);
+                }
+            });
+            
+            // Start workflow controller  
+            let workflow_controller = Arc::new(WorkflowController::new(
+                kube_client.clone(),
+                store.clone(),
+                workflow_engine.clone(),
+            ));
+            let controller = workflow_controller.clone();
+            tokio::spawn(async move {
+                controller.run().await;
+            });
+        }
+        _ => {
+            info!("Running in local execution mode, skipping Kubernetes controllers");
+        }
     }
 
     // Initialize OpenHandsClient (will be replaced in Phase 1 with LLM agent runtime)
@@ -120,7 +154,7 @@ async fn main() -> Result<()> {
     // Initialize scheduler (will be replaced with workflow engine in Phase 1)
     info!("Initializing task scheduler...");
     let scheduler = Arc::new(Mutex::new(TaskScheduler::new(
-        kube_client,
+        kube_client.clone(),
         openhands_client,
         store.clone(),
         config.execution.mode.clone(),
@@ -138,7 +172,7 @@ async fn main() -> Result<()> {
         .await
         .map_err(|e| {
             tracing::error!("Failed to bind to {}: {}", config.server.addr, e);
-            punching_fist_operator::OperatorError::Io(e)
+            Error::Io(e)
         })?;
 
     info!("Server listening on {}", config.server.addr);
@@ -147,7 +181,7 @@ async fn main() -> Result<()> {
         .await
         .map_err(|e| {
             tracing::error!("Server error: {}", e);
-            punching_fist_operator::OperatorError::Config(format!("Server error: {}", e))
+            Error::Config(format!("Server error: {}", e))
         })?;
 
     Ok(())

@@ -1,18 +1,18 @@
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
-use serde_json::Value as JsonValue;
-use sqlx::{Pool, Sqlite, SqlitePool, Row};
-use std::collections::HashMap;
+use sqlx::{sqlite::SqlitePool, Pool, Sqlite, Row};
 use tracing::{debug, error, info};
 use uuid::Uuid;
+use std::collections::HashMap;
+use serde_json::Value as JsonValue;
 
 use crate::{
     store::{
-        Alert, AlertSeverity, AlertStatus, CustomResource, DeduplicationResult, 
-        SinkOutput, SinkStatus, SinkType, SourceEvent, SourceType, StepStatus, 
-        StepType, Store, Workflow, WorkflowStatus, WorkflowStep,
+        Alert, AlertStatus, AlertSeverity, CustomResource, DeduplicationResult,
+        SinkOutput, SinkStatus, SourceEvent, SourceType, StepStatus, 
+        Store, Workflow, WorkflowStatus, WorkflowStep,
     },
-    OperatorError, Result,
+    Error, Result,
 };
 
 pub struct SqliteStore {
@@ -27,7 +27,7 @@ impl SqliteStore {
             .await
             .map_err(|e| {
                 error!("Failed to connect to SQLite: {}", e);
-                OperatorError::Sqlx(e)
+                Error::Sqlx(e)
             })?;
         
         Ok(Self { pool })
@@ -44,7 +44,7 @@ impl Store for SqliteStore {
             .await
             .map_err(|e| {
                 error!("Failed to run migrations: {}", e);
-                OperatorError::Migrate(e)
+                Error::Migrate(e)
             })?;
         
         Ok(())
@@ -243,7 +243,7 @@ impl Store for SqliteStore {
                 .bind(Utc::now())
                 .bind(id.to_string())
             }
-            _ => return Err(OperatorError::Config(format!("Invalid timing field: {}", field))),
+            _ => return Err(Error::Config(format!("Invalid timing field: {}", field))),
         };
         
         query.execute(&self.pool).await?;
@@ -424,7 +424,7 @@ impl Store for SqliteStore {
 
 // Helper implementations for parsing string to enums
 impl std::str::FromStr for AlertStatus {
-    type Err = OperatorError;
+    type Err = Error;
     
     fn from_str(s: &str) -> Result<Self> {
         match s {
@@ -432,20 +432,20 @@ impl std::str::FromStr for AlertStatus {
             "triaging" => Ok(AlertStatus::Triaging),
             "resolved" => Ok(AlertStatus::Resolved),
             "escalated" => Ok(AlertStatus::Escalated),
-            _ => Err(OperatorError::Config(format!("Invalid alert status: {}", s))),
+            _ => Err(Error::Config(format!("Invalid alert status: {}", s))),
         }
     }
 }
 
 impl std::str::FromStr for AlertSeverity {
-    type Err = OperatorError;
+    type Err = Error;
     
     fn from_str(s: &str) -> Result<Self> {
         match s {
             "critical" => Ok(AlertSeverity::Critical),
             "warning" => Ok(AlertSeverity::Warning),
             "info" => Ok(AlertSeverity::Info),
-            _ => Err(OperatorError::Config(format!("Invalid alert severity: {}", s))),
+            _ => Err(Error::Config(format!("Invalid alert severity: {}", s))),
         }
     }
 }

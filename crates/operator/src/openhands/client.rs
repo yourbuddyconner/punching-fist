@@ -4,10 +4,10 @@ use std::sync::Arc;
 use uuid::Uuid;
 use chrono::Utc;
 use crate::{
-    Result,
-    OperatorError,
     config::{OpenHandsConfig, TaskExecutionMode},
     store::Store,
+    Error,
+    Result, Task
 };
 
 pub struct OpenHandsClient {
@@ -20,7 +20,7 @@ impl OpenHandsClient {
     pub fn new(config: OpenHandsConfig, execution_mode: TaskExecutionMode, store: Arc<dyn Store>) -> Result<Self> {
         // OpenHands requires an API key
         if config.api_key.is_empty() {
-            return Err(OperatorError::Config(
+            return Err(Error::Config(
                 "LLM_API_KEY environment variable must be set".to_string(),
             ));
         }
@@ -42,12 +42,12 @@ impl OpenHandsClient {
                 }
                 Ok(output) => {
                     let error = String::from_utf8_lossy(&output.stderr).trim().to_string();
-                    return Err(OperatorError::Config(
+                    return Err(Error::Config(
                         format!("Docker command failed: {}", error)
                     ));
                 }
                 Err(e) => {
-                    return Err(OperatorError::Config(
+                    return Err(Error::Config(
                         format!("Docker not found or not accessible: {}. Ensure Docker is installed and running.", e)
                     ));
                 }
@@ -63,9 +63,9 @@ impl OpenHandsClient {
         })
     }
 
-    // TODO: Phase 1 - This will be replaced with the LLM agent runtime
-    pub async fn process_task(&self, _task: &crate::Task, _task_id: Uuid) -> Result<()> {
-        tracing::warn!("OpenHands client not yet implemented for Phase 1 - will be replaced with LLM agent runtime");
+    pub async fn process_task(&self, _task: &Task, _task_id: Uuid) -> Result<()> {
+        // TODO: Phase 1 - This will be replaced by the LLM agent runtime
+        tracing::warn!("OpenHands task processing not yet implemented for Phase 1");
         Ok(())
     }
 
@@ -95,7 +95,7 @@ impl OpenHandsClient {
         let user_id_output = std::process::Command::new("id")
             .arg("-u")
             .output()
-            .map_err(|e| OperatorError::OpenHands(format!("Failed to get user ID: {}", e)))?
+            .map_err(|e| Error::OpenHands(format!("Failed to get user ID: {}", e)))?
             .stdout;
         let user_id = String::from_utf8_lossy(&user_id_output).trim().to_string();
 
@@ -164,14 +164,14 @@ impl OpenHandsClient {
         // Spawn the Docker process
         let child = cmd
             .spawn()
-            .map_err(|e| OperatorError::OpenHands(format!(
+            .map_err(|e| Error::OpenHands(format!(
                 "Failed to spawn OpenHands Docker container: {}. Ensure Docker is running and accessible.", e
             )))?;
 
         let output = child
             .wait_with_output()
             .await
-            .map_err(|e| OperatorError::OpenHands(format!(
+            .map_err(|e| Error::OpenHands(format!(
                 "Failed to wait for OpenHands Docker container: {}", e
             )))?;
 
@@ -244,7 +244,7 @@ impl OpenHandsClient {
         }
 
         if !output.status.success() {
-            return Err(OperatorError::OpenHands(format!(
+            return Err(Error::OpenHands(format!(
                 "OpenHands Docker container exited with status {}: {}",
                 output.status,
                 stderr.trim()

@@ -3,7 +3,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use uuid::Uuid;
-use crate::{Result, OperatorError};
+use crate::{Result, Error};
 
 use super::traits::{Alert, AlertReceiver, Task, TaskResources};
 
@@ -69,7 +69,7 @@ impl PrometheusReceiver {
 
     fn validate_prometheus_alert(&self, alert: &PrometheusAlert) -> Result<()> {
         if alert.version != "4" {
-            return Err(OperatorError::Config("Unsupported alert version".into()));
+            return Err(Error::Config("Unsupported alert version".into()));
         }
         Ok(())
     }
@@ -114,10 +114,10 @@ impl AlertReceiver for PrometheusReceiver {
     fn validate_alert(&self, alert: &Alert) -> Result<()> {
         // Basic validation
         if alert.name.is_empty() {
-            return Err(OperatorError::Config("Alert name is required".into()));
+            return Err(Error::Config("Alert name is required".into()));
         }
         if alert.status.is_empty() {
-            return Err(OperatorError::Config("Alert status is required".into()));
+            return Err(Error::Config("Alert status is required".into()));
         }
         Ok(())
     }

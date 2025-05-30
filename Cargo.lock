@@ -1839,6 +1839,7 @@ dependencies = [
  "kube",
  "mockall",
  "prometheus",
+ "regex",
  "reqwest",
  "schemars",
  "serde",

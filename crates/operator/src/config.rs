@@ -117,14 +117,14 @@ impl Config {
         match config.database.db_type {
             DatabaseType::Postgres => {
                 if config.database.connection_string.is_none() {
-                    return Err(crate::OperatorError::Config(
+                    return Err(crate::Error::Config(
                         "DATABASE_URL must be set when using PostgreSQL".to_string(),
                     ));
                 }
             }
             DatabaseType::Sqlite => {
                 if config.database.sqlite_path.is_none() {
-                    return Err(crate::OperatorError::Config(
+                    return Err(crate::Error::Config(
                         "SQLITE_PATH must be set when using SQLite".to_string(),
                     ));
                 }
