@@ -82,11 +82,7 @@ impl Config {
                     .map(PathBuf::from)
                     .ok()
                     .or_else(|| Some(PathBuf::from("data/punching-fist.db"))),
-                postgres_url: std::env::var("DATABASE_URL").ok(),
-                max_connections: std::env::var("DATABASE_MAX_CONNECTIONS")
-                    .ok()
-                    .and_then(|s| s.parse().ok())
-                    .unwrap_or(5),
+                connection_string: std::env::var("DATABASE_URL").ok(),
             },
             kube: KubeConfig {
                 namespace: std::env::var("KUBE_NAMESPACE")
@@ -120,7 +116,7 @@ impl Config {
         // Validate database configuration
         match config.database.db_type {
             DatabaseType::Postgres => {
-                if config.database.postgres_url.is_none() {
+                if config.database.connection_string.is_none() {
                     return Err(crate::OperatorError::Config(
                         "DATABASE_URL must be set when using PostgreSQL".to_string(),
                     ));
@@ -148,8 +144,7 @@ impl Default for Config {
             database: DatabaseConfig {
                 db_type: DatabaseType::Sqlite,
                 sqlite_path: Some(PathBuf::from("data/punching-fist.db")),
-                postgres_url: None,
-                max_connections: 5,
+                connection_string: None,
             },
             kube: KubeConfig {
                 namespace: "default".to_string(),

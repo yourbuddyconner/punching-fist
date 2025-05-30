@@ -2,82 +2,47 @@ mod routes;
 mod receivers;
 
 use axum::{
+    extract::State,
     routing::{get, post},
     Router,
 };
-use std::sync::Arc;
-use tokio::sync::Mutex;
-use std::net::SocketAddr;
-use tracing;
+use std::sync::{Arc, Mutex};
+use tower_http::trace::TraceLayer;
 
 use crate::{
     config::Config,
     scheduler::TaskScheduler,
-    store::{AlertRecord, Store, TaskRecord, TaskStatus},
-    OperatorError,
+    store::Store,
+    // Removed old imports: AlertRecord, TaskRecord, TaskStatus
 };
-use receivers::{AlertReceiver, PrometheusReceiver, PrometheusConfig};
 
-pub use receivers::Alert;
+pub use receivers::{Alert, PrometheusReceiver};
 
 pub struct Server {
     scheduler: Arc<Mutex<TaskScheduler>>,
-    receiver: Arc<dyn AlertReceiver>,
     store: Arc<dyn Store>,
 }
 
 impl Server {
-    pub fn new(config: &Config, scheduler: Arc<Mutex<TaskScheduler>>, store: Arc<dyn Store>) -> Self {
-        let receiver = Arc::new(PrometheusReceiver::new(PrometheusConfig::default()));
-        Self {
-            scheduler,
-            receiver,
-            store,
-        }
+    pub fn new(_config: &Config, scheduler: Arc<Mutex<TaskScheduler>>, store: Arc<dyn Store>) -> Self {
+        Self { scheduler, store }
     }
 
-    pub async fn start(&self, addr: &str) -> crate::Result<()> {
-        let app = Router::new()
-            .route("/health", get(routes::health_check))
+    pub fn build_router(self) -> Router {
+        let state = Arc::new(self);
+
+        Router::new()
+            .route("/health", get(routes::health))
+            .route("/alerts", post(routes::create_alert))
+            .route("/alerts/:id", get(routes::get_alert))
+            .route("/alerts", get(routes::list_alerts))
+            // TODO: Phase 1 - update task routes to workflow routes
+            //.route("/tasks", post(routes::create_task))
+            //.route("/tasks/:id", get(routes::get_task))
+            //.route("/tasks", get(routes::list_tasks))
+            .route("/webhook/alerts", post(routes::webhook_alerts))
             .route("/metrics", get(routes::metrics))
-            .route("/alerts", post(routes::alert_handler))
-            .route("/alerts/prometheus", post(routes::prometheus_alert_handler))
-            .with_state(Arc::new(ServerState {
-                scheduler: self.scheduler.clone(),
-                receiver: self.receiver.clone(),
-                store: self.store.clone(),
-            }));
-
-        let addr = match addr.parse::<SocketAddr>() {
-            Ok(addr) => addr,
-            Err(e) => {
-                tracing::error!("Failed to parse address {}: {}", addr, e);
-                return Err(OperatorError::Config(format!("Invalid address: {}", e)));
-            }
-        };
-
-        let listener = match tokio::net::TcpListener::bind(addr).await {
-            Ok(listener) => listener,
-            Err(e) => {
-                tracing::error!("Failed to bind to {}: {}", addr, e);
-                return Err(OperatorError::Config(format!("Failed to bind to address: {}", e)));
-            }
-        };
-
-        tracing::info!("Server listening on {}", addr);
-        
-        if let Err(e) = axum::serve(listener, app).await {
-            tracing::error!("Server error: {}", e);
-            return Err(OperatorError::Config(format!("Server error: {}", e)));
-        }
-
-        Ok(())
+            .layer(TraceLayer::new_for_http())
+            .with_state(state)
     }
-}
-
-#[derive(Clone)]
-pub struct ServerState {
-    scheduler: Arc<Mutex<TaskScheduler>>,
-    receiver: Arc<dyn AlertReceiver>,
-    store: Arc<dyn Store>,
 } 

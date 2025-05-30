@@ -7,7 +7,7 @@ use crate::{
     Result,
     OperatorError,
     config::{OpenHandsConfig, TaskExecutionMode},
-    store::{Store, TaskStatus},
+    store::Store,
 };
 
 pub struct OpenHandsClient {
@@ -63,6 +63,14 @@ impl OpenHandsClient {
         })
     }
 
+    // TODO: Phase 1 - This will be replaced with the LLM agent runtime
+    pub async fn process_task(&self, _task: &crate::Task, _task_id: Uuid) -> Result<()> {
+        tracing::warn!("OpenHands client not yet implemented for Phase 1 - will be replaced with LLM agent runtime");
+        Ok(())
+    }
+
+    /*
+    // Old implementation commented out for Phase 1 rewrite
     pub async fn process_task(&self, task: &crate::Task, task_id: Uuid) -> Result<()> {
         // Update task status to Running and set started_at timestamp
         let started_at = Utc::now();
@@ -246,4 +254,5 @@ impl OpenHandsClient {
         tracing::info!("OpenHands task completed successfully in container: {} (Task ID: {})", container_name, task_id);
         Ok(())
     }
+    */
 } 

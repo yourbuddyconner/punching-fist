@@ -3,8 +3,7 @@ use crate::{
     kubernetes::KubeClient,
     openhands::OpenHandsClient,
     server::Alert,
-    store::{Store, TaskRecord},
-    Task,
+    store::Store,
     TaskMetrics,
     Result,
     config::TaskExecutionMode,
@@ -34,6 +33,14 @@ impl TaskScheduler {
         }
     }
 
+    // TODO: Phase 1 - Replace with workflow engine
+    pub async fn schedule_task(&mut self, _alert: Alert, _task_id: uuid::Uuid) -> Result<()> {
+        tracing::warn!("Task scheduling not yet implemented for Phase 1");
+        Ok(())
+    }
+
+    /*
+    // Old implementation commented out for Phase 1 rewrite
     pub async fn schedule_task(&mut self, _alert: Alert, task_record: TaskRecord) -> Result<()> {
         // Convert TaskRecord to the Task format used by OpenHands client
         let task = Task {
@@ -80,6 +87,7 @@ impl TaskScheduler {
 
         Ok(())
     }
+    */
 
     pub fn get_metrics(&self) -> TaskMetrics {
         TaskMetrics {

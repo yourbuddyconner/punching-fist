@@ -1,16 +1,21 @@
+use super::{DatabaseConfig, DatabaseType, Store};
 use crate::Result;
+use std::sync::Arc;
 
-use super::{DatabaseConfig, PostgresStore, SqliteStore, Store};
-
-pub async fn create_store(config: &DatabaseConfig) -> Result<Box<dyn Store>> {
+pub async fn create_store(config: &DatabaseConfig) -> Result<Arc<dyn Store>> {
     match config.db_type {
-        super::DatabaseType::Sqlite => {
-            let store = SqliteStore::new(config).await?;
-            Ok(Box::new(store))
-        }
-        super::DatabaseType::Postgres => {
-            let store = PostgresStore::new(config).await?;
-            Ok(Box::new(store))
-        }
+        DatabaseType::Sqlite => {
+            let database_url = format!("sqlite:{}", config.sqlite_path.as_ref()
+                .ok_or_else(|| crate::OperatorError::Config("SQLite path not configured".into()))?
+                .display());
+            let store = super::SqliteStore::new(&database_url).await?;
+            Ok(Arc::new(store))
+        },
+        DatabaseType::Postgres => {
+            let connection_string = config.connection_string.as_ref()
+                .ok_or_else(|| crate::OperatorError::Config("PostgreSQL connection string not configured".into()))?;
+            let store = super::PostgresStore::new(connection_string).await?;
+            Ok(Arc::new(store))
+        },
     }
 } 

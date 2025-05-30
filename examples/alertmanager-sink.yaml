@@ -1,0 +1,51 @@
+# Example Sink for updating AlertManager with AI analysis results
+apiVersion: punchingfist.io/v1alpha1
+kind: Sink
+metadata:
+  name: alertmanager-update
+  namespace: punchingfist-system
+spec:
+  type: alertmanager
+  config:
+    endpoint: "http://alertmanager:9093"
+    action: "annotate"
+    template: |
+      {
+        "annotations": {
+          "ai_triage_status": "completed",
+          "ai_summary": "{{ .workflow.outputs.investigation_summary }}",
+          "ai_root_cause": "{{ .workflow.outputs.root_cause }}",
+          "ai_severity": "{{ .workflow.outputs.severity_assessment }}",
+          "ai_auto_resolved": "{{ .workflow.outputs.auto_resolved }}",
+          "ai_timestamp": "{{ .workflow.completedAt }}"
+        }
+      }
+---
+# Example Sink for auto-resolving alerts in AlertManager
+apiVersion: punchingfist.io/v1alpha1
+kind: Sink
+metadata:
+  name: alertmanager-resolve
+  namespace: punchingfist-system
+spec:
+  type: alertmanager
+  config:
+    endpoint: "http://alertmanager:9093"
+    action: "resolve"
+    template: |
+      {
+        "matchers": [
+          {
+            "name": "alertname",
+            "value": "{{ .source.data.alert.alertname }}",
+            "isRegex": false
+          },
+          {
+            "name": "namespace",
+            "value": "{{ .source.data.alert.labels.namespace }}",
+            "isRegex": false
+          }
+        ]
+      }
+  # Only resolve if auto-resolution was successful
+  condition: "{{ .workflow.outputs.auto_resolved }}" 

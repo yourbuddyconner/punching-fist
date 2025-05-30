@@ -1,0 +1,38 @@
+# Example Sink for sending enriched alerts to Slack
+apiVersion: punchingfist.io/v1alpha1
+kind: Sink
+metadata:
+  name: slack-ops-channel
+  namespace: punchingfist-system
+spec:
+  type: slack
+  config:
+    channel: "#ops-alerts"
+    # Bot token should be stored in a Kubernetes secret
+    botToken: "slack-bot-token-secret"
+    messageType: "message"
+    mentionUsers: ["@oncall"]
+    template: |
+      🚨 *Alert Investigation Complete*
+      
+      *Alert:* `{{ .source.data.alert.alertname }}`
+      *Severity:* {{ .workflow.outputs.severity_assessment }}
+      *Summary:* {{ .source.data.alert.summary }}
+      
+      🔍 *Investigation Results:*
+      {{ .workflow.outputs.investigation_summary }}
+      
+      🎯 *Root Cause:*
+      {{ .workflow.outputs.root_cause }}
+      
+      {{ if .workflow.outputs.auto_resolved }}
+      ✅ *Status:* Automatically Resolved
+      {{ else }}
+      ⚠️ *Status:* Human Intervention Required
+      
+      📋 *Recommendations:*
+      {{ .workflow.outputs.recommendations }}
+      {{ end }}
+      
+      ⏱️ *Investigation Duration:* {{ .workflow.duration }}
+      🔗 *Source:* {{ .source.name }} | *Workflow:* {{ .workflow.name }} 

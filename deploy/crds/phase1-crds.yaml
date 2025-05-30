@@ -1,0 +1,678 @@
+---
+# Source CRD
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: sources.punchingfist.io
+spec:
+  group: punchingfist.io
+  names:
+    categories: []
+    kind: Source
+    plural: sources
+    shortNames: []
+    singular: source
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns: []
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: Auto-generated derived type for SourceSpec via `CustomResource`
+        properties:
+          spec:
+            properties:
+              config:
+                anyOf:
+                - required:
+                  - path
+                - required:
+                  - channel
+                  - platform
+                  - trigger
+                - required:
+                  - cron
+                - required:
+                  - endpoint
+                  - method
+                - required:
+                  - event
+                  - resource
+                description: Configuration specific to the source type
+                properties:
+                  authentication:
+                    description: Authentication configuration
+                    nullable: true
+                    properties:
+                      secretRef:
+                        description: Reference to secret containing credentials
+                        nullable: true
+                        type: string
+                      type:
+                        description: Authentication type
+                        type: string
+                    required:
+                    - type
+                    type: object
+                  channel:
+                    description: Channel to monitor
+                    type: string
+                  command:
+                    description: Command to listen for (if trigger is command)
+                    nullable: true
+                    type: string
+                  cron:
+                    description: Cron expression
+                    type: string
+                  endpoint:
+                    description: API endpoint path
+                    type: string
+                  event:
+                    description: Event type to watch for
+                    type: string
+                  filters:
+                    additionalProperties:
+                      items:
+                        type: string
+                      type: array
+                    default: {}
+                    description: Filters to apply to incoming webhooks
+                    type: object
+                  labelSelector:
+                    description: Label selector for filtering resources
+                    nullable: true
+                    type: string
+                  method:
+                    description: HTTP method
+                    type: string
+                  path:
+                    description: Path to expose the webhook on
+                    type: string
+                  platform:
+                    description: Chat platform (e.g., slack)
+                    type: string
+                  resource:
+                    description: Resource type to watch
+                    type: string
+                  timezone:
+                    default: UTC
+                    description: Timezone for the schedule
+                    type: string
+                  trigger:
+                    description: 'Trigger type: mention or command'
+                    type: string
+                type: object
+              context:
+                additionalProperties:
+                  type: string
+                default: {}
+                description: Additional context to pass to the workflow
+                type: object
+              triggerWorkflow:
+                description: Name of the workflow to trigger
+                type: string
+              type:
+                description: 'Type of source: webhook, chat, schedule, api, kubernetes'
+                enum:
+                - webhook
+                - chat
+                - schedule
+                - api
+                - kubernetes
+                type: string
+            required:
+            - config
+            - triggerWorkflow
+            - type
+            type: object
+          status:
+            nullable: true
+            properties:
+              conditions:
+                default: []
+                description: Current conditions
+                items:
+                  properties:
+                    lastTransitionTime:
+                      type: string
+                    message:
+                      type: string
+                    reason:
+                      type: string
+                    status:
+                      type: string
+                    type:
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+              eventsProcessed:
+                default: 0
+                description: Number of events processed
+                format: int64
+                type: integer
+              lastEventTime:
+                description: Last time an event was received
+                nullable: true
+                type: string
+              ready:
+                description: Whether the source is ready
+                type: boolean
+            required:
+            - ready
+            type: object
+        required:
+        - spec
+        title: Source
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}
+
+---
+# Workflow CRD
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: workflows.punchingfist.io
+spec:
+  group: punchingfist.io
+  names:
+    categories: []
+    kind: Workflow
+    plural: workflows
+    shortNames: []
+    singular: workflow
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns: []
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        definitions:
+          Step:
+            properties:
+              agent:
+                allOf:
+                - $ref: '#/components/schemas/Step'
+                description: Nested agent configuration for conditional steps
+                nullable: true
+              approvalRequired:
+                default: false
+                description: Whether approval is required before execution
+                type: boolean
+              command:
+                description: Command to execute (for CLI steps)
+                nullable: true
+                type: string
+              condition:
+                description: Condition for conditional steps
+                nullable: true
+                type: string
+              goal:
+                description: Goal for agent (for agent steps)
+                nullable: true
+                type: string
+              maxIterations:
+                description: Maximum iterations for agent
+                format: int32
+                nullable: true
+                type: integer
+              name:
+                description: Step name
+                type: string
+              timeoutMinutes:
+                description: Timeout in minutes
+                format: int32
+                nullable: true
+                type: integer
+              tools:
+                default: []
+                description: Available tools for agent
+                items:
+                  anyOf:
+                  - type: string
+                  - required:
+                    - description
+                    - name
+                  properties:
+                    command:
+                      description: Custom command (optional)
+                      nullable: true
+                      type: string
+                    description:
+                      description: Tool description
+                      type: string
+                    endpoint:
+                      description: Endpoint for API tools
+                      nullable: true
+                      type: string
+                    name:
+                      description: Tool name
+                      type: string
+                  type: object
+                type: array
+              type:
+                description: 'Step type: cli, agent, conditional'
+                enum:
+                - cli
+                - agent
+                - conditional
+                type: string
+            required:
+            - name
+            - type
+            type: object
+        description: Auto-generated derived type for WorkflowSpec via `CustomResource`
+        properties:
+          spec:
+            properties:
+              outputs:
+                default: []
+                description: Output definitions
+                items:
+                  properties:
+                    name:
+                      description: Output name
+                      type: string
+                    value:
+                      description: Value expression
+                      type: string
+                  required:
+                  - name
+                  - value
+                  type: object
+                type: array
+              runtime:
+                description: Runtime configuration for the workflow
+                properties:
+                  environment:
+                    additionalProperties:
+                      type: string
+                    default: {}
+                    description: Environment variables
+                    type: object
+                  image:
+                    description: Container image to use for execution
+                    type: string
+                  llmConfig:
+                    description: LLM configuration
+                    properties:
+                      apiKeySecret:
+                        description: API key secret reference
+                        nullable: true
+                        type: string
+                      endpoint:
+                        description: Endpoint URL for the LLM
+                        type: string
+                      model:
+                        description: Model to use
+                        type: string
+                      provider:
+                        description: LLM provider (local, claude, openai)
+                        type: string
+                    required:
+                    - endpoint
+                    - model
+                    - provider
+                    type: object
+                required:
+                - image
+                - llmConfig
+                type: object
+              sinks:
+                description: Sinks to send results to
+                items:
+                  type: string
+                type: array
+              steps:
+                description: Steps to execute in the workflow
+                items:
+                  properties:
+                    agent:
+                      allOf:
+                      - $ref: '#/components/schemas/Step'
+                      description: Nested agent configuration for conditional steps
+                      nullable: true
+                    approvalRequired:
+                      default: false
+                      description: Whether approval is required before execution
+                      type: boolean
+                    command:
+                      description: Command to execute (for CLI steps)
+                      nullable: true
+                      type: string
+                    condition:
+                      description: Condition for conditional steps
+                      nullable: true
+                      type: string
+                    goal:
+                      description: Goal for agent (for agent steps)
+                      nullable: true
+                      type: string
+                    maxIterations:
+                      description: Maximum iterations for agent
+                      format: int32
+                      nullable: true
+                      type: integer
+                    name:
+                      description: Step name
+                      type: string
+                    timeoutMinutes:
+                      description: Timeout in minutes
+                      format: int32
+                      nullable: true
+                      type: integer
+                    tools:
+                      default: []
+                      description: Available tools for agent
+                      items:
+                        anyOf:
+                        - type: string
+                        - required:
+                          - description
+                          - name
+                        properties:
+                          command:
+                            description: Custom command (optional)
+                            nullable: true
+                            type: string
+                          description:
+                            description: Tool description
+                            type: string
+                          endpoint:
+                            description: Endpoint for API tools
+                            nullable: true
+                            type: string
+                          name:
+                            description: Tool name
+                            type: string
+                        type: object
+                      type: array
+                    type:
+                      description: 'Step type: cli, agent, conditional'
+                      enum:
+                      - cli
+                      - agent
+                      - conditional
+                      type: string
+                  required:
+                  - name
+                  - type
+                  type: object
+                type: array
+            required:
+            - runtime
+            - sinks
+            - steps
+            type: object
+          status:
+            nullable: true
+            properties:
+              completionTime:
+                description: Completion time
+                nullable: true
+                type: string
+              conditions:
+                default: []
+                description: Conditions
+                items:
+                  properties:
+                    lastTransitionTime:
+                      type: string
+                    message:
+                      type: string
+                    reason:
+                      type: string
+                    status:
+                      type: string
+                    type:
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+              error:
+                description: Error message if failed
+                nullable: true
+                type: string
+              outputs:
+                additionalProperties:
+                  type: string
+                default: {}
+                description: Output values
+                type: object
+              phase:
+                description: 'Current phase: pending, running, succeeded, failed'
+                type: string
+              startTime:
+                description: Start time
+                nullable: true
+                type: string
+              steps:
+                default: []
+                description: Step statuses
+                items:
+                  properties:
+                    completionTime:
+                      description: Completion time
+                      nullable: true
+                      type: string
+                    error:
+                      description: Error if failed
+                      nullable: true
+                      type: string
+                    name:
+                      description: Step name
+                      type: string
+                    phase:
+                      description: 'Step phase: pending, running, succeeded, failed'
+                      type: string
+                    result:
+                      description: Step result
+                      nullable: true
+                    startTime:
+                      description: Start time
+                      nullable: true
+                      type: string
+                  required:
+                  - name
+                  - phase
+                  type: object
+                type: array
+            required:
+            - phase
+            type: object
+        required:
+        - spec
+        title: Workflow
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}
+
+---
+# Sink CRD
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: sinks.punchingfist.io
+spec:
+  group: punchingfist.io
+  names:
+    categories: []
+    kind: Sink
+    plural: sinks
+    shortNames: []
+    singular: sink
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns: []
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: Auto-generated derived type for SinkSpec via `CustomResource`
+        properties:
+          spec:
+            properties:
+              condition:
+                description: Condition to evaluate before sending to sink
+                nullable: true
+                type: string
+              config:
+                description: Sink configuration
+                properties:
+                  action:
+                    description: 'Action to perform (for AlertManager: resolve, annotate, silence; for PagerDuty: trigger, resolve)'
+                    nullable: true
+                    type: string
+                  botToken:
+                    description: Bot token secret reference
+                    nullable: true
+                    type: string
+                  channel:
+                    description: Slack configuration Channel to send messages to
+                    nullable: true
+                    type: string
+                  context:
+                    additionalProperties:
+                      type: string
+                    default: {}
+                    description: Additional context
+                    type: object
+                  credentialsSecret:
+                    description: Credentials secret reference (for JIRA)
+                    nullable: true
+                    type: string
+                  endpoint:
+                    description: AlertManager/Prometheus endpoint
+                    nullable: true
+                    type: string
+                  issueType:
+                    description: Issue type (for JIRA)
+                    nullable: true
+                    type: string
+                  job:
+                    description: Job name for metrics (for Prometheus)
+                    nullable: true
+                    type: string
+                  mentionUsers:
+                    default: []
+                    description: Users to mention (for Slack)
+                    items:
+                      type: string
+                    type: array
+                  messageType:
+                    description: 'Message type: message or thread (for Slack)'
+                    nullable: true
+                    type: string
+                  metrics:
+                    additionalProperties:
+                      type: string
+                    default: {}
+                    description: Metrics to push (for Prometheus)
+                    type: object
+                  project:
+                    description: Project key (for JIRA)
+                    nullable: true
+                    type: string
+                  pushgateway:
+                    description: Pushgateway endpoint (for Prometheus)
+                    nullable: true
+                    type: string
+                  routingKey:
+                    description: Routing key (for PagerDuty)
+                    nullable: true
+                    type: string
+                  template:
+                    description: Generic template for formatting output
+                    nullable: true
+                    type: string
+                  triggerCondition:
+                    description: Condition to trigger the workflow (for Workflow sink)
+                    nullable: true
+                    type: string
+                  workflowName:
+                    description: Name of the workflow to trigger (for Workflow sink)
+                    nullable: true
+                    type: string
+                type: object
+              type:
+                description: 'Type of sink: slack, alertmanager, prometheus, jira, pagerduty, workflow'
+                enum:
+                - slack
+                - alertmanager
+                - prometheus
+                - jira
+                - pagerduty
+                - workflow
+                type: string
+            required:
+            - config
+            - type
+            type: object
+          status:
+            nullable: true
+            properties:
+              conditions:
+                default: []
+                description: Conditions
+                items:
+                  properties:
+                    lastTransitionTime:
+                      type: string
+                    message:
+                      type: string
+                    reason:
+                      type: string
+                    status:
+                      type: string
+                    type:
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+              lastError:
+                description: Last error
+                nullable: true
+                type: string
+              lastSentTime:
+                description: Last time a message was sent
+                nullable: true
+                type: string
+              messagesSent:
+                default: 0
+                description: Number of messages sent
+                format: int64
+                type: integer
+              ready:
+                description: Whether the sink is ready
+                type: boolean
+            required:
+            - ready
+            type: object
+        required:
+        - spec
+        title: Sink
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}
+

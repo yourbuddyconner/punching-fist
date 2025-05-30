@@ -1,4 +1,5 @@
 pub mod config;
+pub mod crd;
 pub mod store;
 pub mod server;
 pub mod kubernetes;
@@ -8,6 +9,7 @@ pub mod scheduler;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
+use uuid;
 
 #[derive(Debug, Error)]
 pub enum OperatorError {
@@ -27,6 +29,8 @@ pub enum OperatorError {
     Sqlx(#[from] sqlx::Error),
     #[error("JSON error: {0}")]
     SerdeJson(#[from] serde_json::Error),
+    #[error("UUID error: {0}")]
+    Uuid(#[from] uuid::Error),
 }
 
 pub type Result<T> = std::result::Result<T, OperatorError>;

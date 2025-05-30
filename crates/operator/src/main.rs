@@ -1,5 +1,5 @@
 use std::sync::Arc;
-use tokio::sync::Mutex;
+use std::sync::Mutex;
 use tracing::info;
 
 // becomes:
@@ -23,13 +23,13 @@ async fn main() -> Result<()> {
         )
         .init();
 
-    info!("Starting punching-fist-operator...");
+    info!("Starting punching-fist-operator Phase 1...");
 
     // Load configuration
     info!("Loading configuration...");
     let config = match Config::load() {
         Ok(config) => {
-            info!("Successfully loaded configuration: {:?}", config);
+            info!("Successfully loaded configuration");
             config
         }
         Err(e) => {
@@ -40,7 +40,7 @@ async fn main() -> Result<()> {
 
     // Initialize store
     info!("Initializing database store...");
-    let store_boxed = match create_store(&config.database).await {
+    let store = match create_store(&config.database).await {
         Ok(store) => {
             info!("Successfully created database store");
             store
@@ -52,13 +52,11 @@ async fn main() -> Result<()> {
     };
 
     info!("Initializing database...");
-    if let Err(e) = store_boxed.init().await {
+    if let Err(e) = store.init().await {
         tracing::error!("Failed to initialize database: {}", e);
         return Err(e);
     }
     info!("Database initialized successfully");
-
-    let store: Arc<dyn store::Store> = Arc::from(store_boxed);
 
     // Initialize KubeClient only if we're in Kubernetes execution mode
     let kube_client = match config.execution.mode {
@@ -81,7 +79,7 @@ async fn main() -> Result<()> {
         }
     };
 
-    // Initialize OpenHandsClient
+    // Initialize OpenHandsClient (will be replaced in Phase 1 with LLM agent runtime)
     info!("Initializing OpenHands client...");
     let openhands_client = match OpenHandsClient::new(config.openhands.clone(), config.execution.mode.clone(), store.clone()) {
         Ok(client) => {
@@ -94,7 +92,7 @@ async fn main() -> Result<()> {
         }
     };
 
-    // Initialize scheduler
+    // Initialize scheduler (will be replaced with workflow engine in Phase 1)
     info!("Initializing task scheduler...");
     let scheduler = Arc::new(Mutex::new(TaskScheduler::new(
         kube_client,
@@ -107,13 +105,25 @@ async fn main() -> Result<()> {
     // Initialize server
     info!("Initializing HTTP server...");
     let server = Server::new(&config, scheduler.clone(), store.clone());
+    let app = server.build_router();
 
     // Start server
     info!("Starting server on {}", config.server.addr);
-    if let Err(e) = server.start(&config.server.addr).await {
-        tracing::error!("Server failed to start: {}", e);
-        return Err(e);
-    }
+    let listener = tokio::net::TcpListener::bind(&config.server.addr)
+        .await
+        .map_err(|e| {
+            tracing::error!("Failed to bind to {}: {}", config.server.addr, e);
+            punching_fist_operator::OperatorError::Io(e)
+        })?;
+
+    info!("Server listening on {}", config.server.addr);
+    
+    axum::serve(listener, app)
+        .await
+        .map_err(|e| {
+            tracing::error!("Server error: {}", e);
+            punching_fist_operator::OperatorError::Config(format!("Server error: {}", e))
+        })?;
 
     Ok(())
 } 

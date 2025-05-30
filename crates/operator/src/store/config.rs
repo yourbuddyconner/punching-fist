@@ -2,48 +2,48 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DatabaseConfig {
+    #[serde(rename = "type")]
+    pub db_type: DatabaseType,
+    
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sqlite_path: Option<PathBuf>,
+    
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub connection_string: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum DatabaseType {
     Sqlite,
     Postgres,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DatabaseConfig {
-    #[serde(alias = "type")]
-    pub db_type: DatabaseType,
-    pub sqlite_path: Option<PathBuf>,
-    pub postgres_url: Option<String>,
-    pub max_connections: u32,
-}
-
 impl Default for DatabaseConfig {
     fn default() -> Self {
         Self {
             db_type: DatabaseType::Sqlite,
-            sqlite_path: Some(PathBuf::from("punching-fist.db")),
-            postgres_url: None,
-            max_connections: 5,
+            sqlite_path: Some(PathBuf::from("data/punchingfist.db")),
+            connection_string: None,
         }
     }
 }
 
 impl DatabaseConfig {
-    pub fn sqlite(path: impl Into<PathBuf>) -> Self {
-        Self {
-            db_type: DatabaseType::Sqlite,
-            sqlite_path: Some(path.into()),
-            postgres_url: None,
-            max_connections: 5,
+    pub fn validate(&self) -> Result<(), String> {
+        match self.db_type {
+            DatabaseType::Sqlite => {
+                if self.sqlite_path.is_none() {
+                    return Err("SQLite path is required for SQLite database type".to_string());
+                }
+            }
+            DatabaseType::Postgres => {
+                if self.connection_string.is_none() {
+                    return Err("Connection string is required for PostgreSQL database type".to_string());
+                }
+            }
         }
-    }
-
-    pub fn postgres(url: impl Into<String>) -> Self {
-        Self {
-            db_type: DatabaseType::Postgres,
-            sqlite_path: None,
-            postgres_url: Some(url.into()),
-            max_connections: 5,
-        }
+        Ok(())
     }
 } 
