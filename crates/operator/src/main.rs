@@ -5,7 +5,6 @@ use tracing::{info, warn};
 use punching_fist_operator::{
     config::{Config, TaskExecutionMode},
     controllers::{SourceController, WorkflowController},
-    openhands::OpenHandsClient,
     scheduler::TaskScheduler,
     server::Server,
     sources::WebhookHandler,
@@ -138,24 +137,10 @@ async fn main() -> Result<()> {
         }
     }
 
-    // Initialize OpenHandsClient (will be replaced in Phase 1 with LLM agent runtime)
-    info!("Initializing OpenHands client...");
-    let openhands_client = match OpenHandsClient::new(config.openhands.clone(), config.execution.mode.clone(), store.clone()) {
-        Ok(client) => {
-            info!("Successfully initialized OpenHands client");
-            Arc::new(client)
-        }
-        Err(e) => {
-            tracing::error!("Failed to initialize OpenHands client: {}", e);
-            return Err(e);
-        }
-    };
-
-    // Initialize scheduler (will be replaced with workflow engine in Phase 1)
-    info!("Initializing task scheduler...");
+    // Initialize scheduler (legacy - will be fully removed later)
+    info!("Initializing task scheduler (legacy)...");
     let scheduler = Arc::new(Mutex::new(TaskScheduler::new(
         kube_client.clone(),
-        openhands_client,
         store.clone(),
         config.execution.mode.clone(),
     )));

@@ -86,10 +86,14 @@ The operator follows a clean event-driven architecture where **Sources** trigger
   - Cross-alert correlation and incident grouping
 
 #### 4. **LLM Runtime Integration**
-- **Primary Target**: Cluster-local LLMs running on GPUs
-- **Fallback Support**: Claude API, OpenAI API family
-- **Context Management**: Intelligent context window management
-- **Prompt Engineering**: Structured prompts for maintenance tasks
+- **Powered by Rig**: Rust library for ergonomic LLM integration
+- **Provider Abstraction**: Unified interface across LLM providers:
+  - **Local LLMs**: Via Rig's local provider support (primary target)
+  - **Cloud Providers**: Claude (Anthropic), OpenAI, Cohere, Gemini
+  - **Open Models**: Together.ai integration for Llama, Mistral, etc.
+- **Agent Framework**: Built on Rig's completion and tool-use patterns
+- **Context Management**: Leverages Rig's built-in context handling
+- **Prompt Engineering**: Structured prompts using Rig's builder patterns
 
 ## Database Schema
 
@@ -605,141 +609,168 @@ config:
   triggerCondition: "severity == 'critical'"
 ```
 
+## Rig Integration Architecture
 
+### **Core Abstraction Layers**
 
-### Alert Triage Flow
-```
-AlertManager → [Alert Triage Workflow] → Slack + AlertManager Update + Metrics
-```
+#### **1. Provider Management**
+```rust
+// crates/operator/src/agent/llm_provider.rs
+use rig::providers::{self, Provider};
 
-### Chat-Triggered Debug
-```
-Slack Command → [Debug Workflow] → Slack Thread + Dashboard Update
-```
+pub enum LLMProvider {
+    Local(providers::local::Client),
+    Anthropic(providers::anthropic::Client),
+    OpenAI(providers::openai::Client),
+    Together(providers::together::Client),
+}
 
-### Scheduled Maintenance
-```
-Cron Source → [Health Check Workflow] → Slack (if issues) + Metrics
-```
-
-### Workflow Chaining
-```
-Alert → [Triage Workflow] → [Escalation Workflow] → PagerDuty + JIRA
-```
-
-## Runtime Environment & Agent Sandbox
-
-### Containerized Investigation Environment
-```dockerfile
-FROM rust:1.70-slim
-
-# Core Kubernetes tools
-RUN apt-get update && apt-get install -y \
-    kubectl \
-    curl \
-    jq \
-    git \
-    htop \
-    netcat-openbsd
-
-# Prometheus query tools
-RUN curl -L https://github.com/prometheus/prometheus/releases/download/v2.40.0/promtool-2.40.0.linux-amd64.tar.gz \
-    | tar xz --strip-components=1 -C /usr/local/bin
-
-# Custom investigation scripts
-COPY tools/debug-pod.sh /usr/local/bin/
-COPY tools/check-metrics.sh /usr/local/bin/
-COPY tools/analyze-logs.sh /usr/local/bin/
-
-# LLM runtime configuration
-ENV LLM_ENDPOINT=""
-ENV LLM_MODEL=""
-ENV PROMETHEUS_URL=""
-ENV KUBECONFIG="/var/run/secrets/kubernetes.io/serviceaccount"
-
-WORKDIR /workspace
-CMD ["/usr/local/bin/punchingfist-runtime"]
+impl LLMProvider {
+    pub fn from_config(config: &LLMConfig) -> Result<Self> {
+        match config.provider.as_str() {
+            "local" => Ok(Self::Local(
+                providers::local::Client::new(&config.endpoint)
+            )),
+            "anthropic" => Ok(Self::Anthropic(
+                providers::anthropic::Client::from_env()
+            )),
+            "openai" => Ok(Self::OpenAI(
+                providers::openai::Client::from_env()
+            )),
+            "together" => Ok(Self::Together(
+                providers::together::Client::from_env()
+            )),
+            _ => Err(Error::Config(format!("Unsupported provider: {}", config.provider)))
+        }
+    }
+}
 ```
 
-### Agent Tool Registry
+#### **2. Tool Implementation**
+```rust
+// crates/operator/src/agent/tools.rs
+use rig::tool::{Tool, ToolDescription, ToolResult};
 
-#### **Core Kubernetes Tools**
-- `kubectl get/describe/logs/top` - Cluster state inspection
-- `kubectl exec` - Container debugging (when safe)
-- `kubectl port-forward` - Network connectivity testing
+#[derive(Tool)]
+#[tool(description = "Execute kubectl commands for Kubernetes inspection")]
+pub struct KubectlTool {
+    client: kube::Client,
+    allowed_verbs: Vec<String>,
+}
 
-#### **Monitoring & Metrics**
-- `promtool query` - Direct Prometheus queries
-- `curl $PROMETHEUS_URL/api/v1/query` - Custom metric queries
-- Built-in metric analysis functions
+impl KubectlTool {
+    async fn execute(&self, command: &str) -> ToolResult {
+        // Parse and validate kubectl command
+        // Execute via Kubernetes API
+        // Return formatted result
+    }
+}
 
-#### **Log Analysis**
-- `kubectl logs` with filtering and aggregation
-- Log pattern recognition and anomaly detection
-- Cross-pod log correlation
+#[derive(Tool)]
+#[tool(description = "Query Prometheus metrics using PromQL")]
+pub struct PromQLTool {
+    prometheus_url: String,
+    auth_token: Option<String>,
+}
 
-#### **Network Diagnostics**
-- `netcat` for connectivity testing
-- DNS resolution checks
-- Service endpoint validation
-
-#### **Custom Investigation Scripts**
-```bash
-# /usr/local/bin/debug-pod.sh
-#!/bin/bash
-POD_NAME=$1
-kubectl describe pod $POD_NAME
-kubectl logs $POD_NAME --tail=100
-kubectl top pod $POD_NAME
+#[derive(Tool)]
+#[tool(description = "Perform HTTP requests for health checks")]
+pub struct CurlTool {
+    allowed_domains: Vec<String>,
+}
 ```
 
-### Agent Workflow Example
+#### **3. Agent Runtime**
+```rust
+// crates/operator/src/agent/runtime.rs
+use rig::{agent::Agent, completion::Prompt};
+
+pub struct AgentRuntime {
+    provider: LLMProvider,
+    tools: Vec<Box<dyn Tool>>,
+    max_iterations: u32,
+}
+
+impl AgentRuntime {
+    pub async fn investigate(&self, goal: &str, context: &WorkflowContext) -> Result<AgentResult> {
+        // Build agent with tools
+        let agent = self.provider
+            .agent("investigation")
+            .preamble(INVESTIGATION_PREAMBLE)
+            .tools(&self.tools)
+            .max_iterations(self.max_iterations)
+            .build();
+
+        // Create investigation prompt with context
+        let prompt = format!(
+            "Goal: {}\n\nContext:\n{}",
+            goal,
+            serde_json::to_string_pretty(&context)?
+        );
+
+        // Execute agent reasoning loop
+        let response = agent.prompt(&prompt).await?;
+        
+        // Parse and structure results
+        Ok(AgentResult {
+            findings: response.content,
+            confidence: response.metadata.confidence,
+            actions_taken: response.tool_calls,
+            recommendations: self.extract_recommendations(&response),
+        })
+    }
+}
+```
+
+### **Workflow Integration**
+
+The Rig-powered agent integrates seamlessly with the workflow engine:
+
 ```yaml
-- name: "investigate-pod-crash"
-  type: "agent"
-  goal: |
-    Pod {{ .alert.labels.pod }} is crash-looping. Investigate the root cause:
-    1. Check recent logs for error patterns
-    2. Examine pod resource usage 
-    3. Verify related service health
-    4. Check if this is a known issue pattern
-    5. Recommend resolution steps or escalation with context
-  tools:
-    - "kubectl"
-    - "promtool" 
-    - "curl"
-    - "debug-pod.sh"
-  maxIterations: 10
-  context: |
-    Alert: {{ .alert.summary }}
-    Affected pod: {{ .alert.labels.pod }}
-    Namespace: {{ .alert.labels.namespace }}
-    Time: {{ .alert.startsAt }}
+apiVersion: punchingfist.io/v1alpha1
+kind: Workflow
+spec:
+  runtime:
+    llmConfig:
+      provider: "local"  # or "anthropic", "openai", "together"
+      endpoint: "http://llm-service:8080"  # for local provider
+      model: "llama-3.1-70b"
+      temperature: 0.7
+      maxTokens: 4096
+  
+  steps:
+    - name: "investigate-alert"
+      type: "agent"
+      goal: "Investigate the alert and determine root cause"
+      tools:
+        - kubectl
+        - promql
+        - curl
+      rigConfig:
+        # Rig-specific configuration
+        retryPolicy:
+          maxAttempts: 3
+          backoff: "exponential"
+        safety:
+          requireApproval: ["delete", "patch", "scale"]
 ```
 
-### LLM Agent Capabilities
+### **Safety & Governance**
 
-#### **Investigation Patterns**
-The agent can execute complex investigation workflows like:
+Rig integration includes built-in safety features:
 
-```
-1. kubectl describe pod → Check for resource limits, scheduling issues
-2. kubectl logs → Look for application errors, stack traces  
-3. promtool query 'rate(http_requests_total[5m])' → Check request patterns
-4. kubectl get events → Look for cluster-level issues
-5. Cross-reference with runbook knowledge → Apply known solutions
-```
+1. **Tool Sandboxing**: Each tool validates and sanitizes inputs
+2. **Approval Gates**: Destructive operations require human confirmation
+3. **Audit Logging**: All LLM interactions and tool executions logged
+4. **Token Limits**: Prevent runaway costs with configurable limits
+5. **Rate Limiting**: Provider-specific rate limit handling
 
-#### **Contextual Reasoning**
-- **Historical Context**: "Similar crash happened 3 days ago, resolved by increasing memory limit"
-- **Cluster Awareness**: "High memory usage across all nodes suggests cluster-wide issue"
-- **Application Logic**: "HTTP 500 errors correlate with database connection timeouts"
+### **Performance Optimizations**
 
-#### **Safety Boundaries**
-- **Read-Only by Default**: Most investigation tools are read-only
-- **Approval Gates**: Destructive actions require human approval
-- **RBAC Enforcement**: Agent respects ServiceAccount permissions
-- **Command Validation**: Pre-execution safety checks
+1. **Connection Pooling**: Reuse LLM provider connections
+2. **Response Caching**: Cache similar investigations (configurable TTL)
+3. **Streaming Support**: Process LLM responses as they arrive
+4. **Parallel Tool Execution**: Run independent tools concurrently
 
 ## Safety & Reliability
 
@@ -1193,7 +1224,8 @@ spec:
 - **tokio**: Async runtime
 - **serde**: Serialization/deserialization
 - **sqlx**: Database abstraction
-- **reqwest**: HTTP client for LLM APIs
+- **reqwest**: HTTP client
+- **rig**: LLM integration and agent framework
 - **prometheus**: Metrics collection
 - **tracing**: Logging and tracing
 - **slack-api**: Chat integration
@@ -1203,6 +1235,8 @@ spec:
 - PostgreSQL or SQLite
 - Container runtime (Docker/Containerd)
 - LLM endpoint (local or cloud)
+  - Local: Ollama, vLLM, or compatible API
+  - Cloud: Anthropic, OpenAI, Together.ai
 
 ## Success Metrics
 

@@ -23,6 +23,14 @@ path = "examples/test_workflow_agent.rs"
 name = "test_anthropic"
 path = "examples/test_anthropic.rs"
 
+[[example]]
+name = "test_openai"
+path = "examples/test_openai.rs"
+
+[[example]]
+name = "test_rig_tools"
+path = "examples/test_rig_tools.rs"
+
 [features]
 default = ["server"]
 server = []

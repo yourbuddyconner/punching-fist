@@ -1,152 +1,172 @@
-# 👊🤖
+# Punching Fist Operator
 
-A Kubernetes operator designed to run in your cluster and perform one-off or automated maintenance tasks. Built with Rust and Axum, Punching Fist provides a robust solution for cluster maintenance and automation.
+A Kubernetes operator that provides intelligent incident response using LLM-powered investigation and automated remediation.
 
 ## Overview
 
-Punching Fist Operator (👊🤖) is a Kubernetes operator that leverages AI-powered automation to handle cluster maintenance tasks. It integrates with your existing monitoring stack and can respond to alerts or perform scheduled maintenance operations.
-
-### Key Features
-
-- 🤖 AI-powered maintenance using OpenHands in headless mode
-- 🔄 Real-time alert response via webhook integration
-- 📊 Prometheus metrics integration
-- 🔧 Kubernetes-native operations
-- 🛡️ Secure service account-based authentication
-- 🚀 High-performance Rust implementation
+Punching Fist is a Kubernetes operator designed to:
+- 📊 Listen for alerts from AlertManager and other monitoring systems
+- 🔍 Perform intelligent investigation using LLM agents
+- 🤖 Execute safe remediation actions based on investigation findings
+- 📝 Generate detailed reports of findings and actions taken
 
 ## Architecture
 
-The operator consists of several key components:
+The operator implements a Source → Workflow → Sink pipeline:
 
-1. **Webhook Server**: Built with Axum, handles HTTP webhook requests from alerting systems
-2. **OpenHands Integration**: Processes maintenance tasks using AI
-3. **Kubernetes Client**: Manages cluster operations
-4. **Prometheus Integration**: Collects and analyzes metrics
+1. **Sources**: Receive alerts from various monitoring systems (AlertManager, Prometheus, custom webhooks)
+2. **Workflows**: Define investigation and remediation steps with LLM-powered decision making
+3. **Sinks**: Send results to various destinations (Slack, PagerDuty, custom webhooks)
 
-## Prerequisites
+## Quick Start
 
-- Kubernetes cluster (v1.20+)
-- Prometheus AlertManager
-- OpenHands API access
-- kubectl installed in the operator container
+### Prerequisites
 
-## Installation
+- Kubernetes cluster
+- kubectl configured
+- Helm 3
+- LLM API access (Anthropic Claude or OpenAI)
+
+### Installation
 
 ```bash
-# Add the Helm repository
-helm repo add punching-fist https://your-helm-repo-url
+# Deploy with Helm
+helm install punching-fist ./charts/punching-fist \
+  --namespace punching-fist \
+  --create-namespace
 
-# Install the operator
-helm install punching-fist punching-fist/punching-fist \
+# Or deploy with a specific API key
+helm install punching-fist ./charts/punching-fist \
   --namespace punching-fist \
   --create-namespace \
-  --set openhands.apiKey=your-api-key
+  --set agent.anthropicApiKey=your-api-key
+```
+
+### Local Development
+
+```bash
+# Install dependencies
+just install
+
+# Run locally
+just run
+
+# Run tests
+just test
 ```
 
 ## Configuration
-
-The operator is configured entirely through environment variables. For development, create a `.env` file in the project root (copy from `env.example`):
-
-```bash
-# Copy the example file
-cp env.example .env
-
-# Edit the values
-vim .env
-```
 
 ### Environment Variables
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `SERVER_ADDR` | Server bind address | `0.0.0.0:8080` |
+| `DATABASE_TYPE` | Database type (sqlite or postgres) | `sqlite` |
+| `DATABASE_URL` | PostgreSQL connection string | - |
+| `SQLITE_PATH` | Path to SQLite database file | `data/punching-fist.db` |
+| `SERVER_ADDR` | Server listen address | `0.0.0.0:8080` |
+| `ANTHROPIC_API_KEY` | API key for Anthropic Claude | - |
+| `OPENAI_API_KEY` | API key for OpenAI | - |
+| `LLM_PROVIDER` | LLM provider (anthropic, openai, mock) | `anthropic` |
+| `LLM_MODEL` | Default LLM model | `claude-3-5-sonnet` |
 | `KUBE_NAMESPACE` | Kubernetes namespace | `default` |
-| `KUBE_SERVICE_ACCOUNT` | Service account name | `punching-fist` |
-| `LLM_API_KEY` | LLM API key for OpenHands | (required) |
-| `LLM_MODEL` | Default LLM model for OpenHands | `anthropic/claude-3-5-sonnet-20241022` |
-| `EXECUTION_MODE` | Execution mode (`local` or `kubernetes`) | `local` |
-| `DATABASE_TYPE` | Database type (`sqlite` or `postgres`) | `sqlite` |
-| `SQLITE_PATH` | SQLite database path | `data/punching-fist.db` |
-| `DATABASE_URL` | PostgreSQL connection URL | (required for postgres) |
-| `DATABASE_MAX_CONNECTIONS` | Max database connections | `5` |
-| `RUST_LOG` | Logging level | `info` |
+| `EXECUTION_MODE` | Execution mode (local or kubernetes) | `local` |
 
-**Note:** `LLM_API_KEY` is required for OpenHands AI functionality to work. This should be your LLM provider's API key (e.g., OpenAI, Anthropic, etc.).
+**Note:** Either `ANTHROPIC_API_KEY` or `OPENAI_API_KEY` must be set for LLM functionality. If neither is set, the operator will use a mock provider for testing.
 
-### Kubernetes ConfigMap and Secrets
-
-For production deployments, use ConfigMaps and Secrets:
+### Example Workflow
 
 ```yaml
-apiVersion: v1
-kind: ConfigMap
+apiVersion: punching-fist.io/v1alpha1
+kind: Workflow
 metadata:
-  name: punching-fist-config
-data:
-  openhands.apiKey: "your-api-key"
-  server.port: "8080"
-  prometheus.enabled: "true"
-```
-
-## Usage
-
-### Alert Integration
-
-Configure Prometheus AlertManager to send alerts to the operator:
-
-```yaml
-receivers:
-- name: 'punching-fist'
-  webhook_configs:
-  - url: 'http://punching-fist:8080/webhook/alerts'
-```
-
-### Custom Maintenance Tasks
-
-Create a maintenance task:
-
-```yaml
-apiVersion: maintenance.punchingfist.io/v1
-kind: MaintenanceTask
-metadata:
-  name: cleanup-old-pods
+  name: pod-crash-investigation
 spec:
-  schedule: "0 0 * * *"
-  action: "cleanup"
-  parameters:
-    age: "7d"
+  trigger:
+    source: alertmanager
+    filters:
+      alertname: PodCrashLooping
+  steps:
+    - name: investigate
+      type: agent
+      config:
+        prompt: |
+          Investigate why pod {{ .alert.labels.pod }} is crash looping.
+          Use kubectl to check logs and describe the pod.
+        tools:
+          - kubectl
+          - promql
+    - name: notify
+      type: sink
+      config:
+        sink: slack
+        message: |
+          Pod {{ .alert.labels.pod }} investigation complete:
+          {{ .steps.investigate.output }}
 ```
 
-## Development
-
-### Building from Source
-
-```bash
-# Clone the repository
-git clone https://github.com/your-org/punching-fist-operator
-
-# Build the operator
-cargo build --release
-
-# Build the container
-docker build -t punching-fist:latest .
-```
+## Testing
 
 ### Running Tests
 
 ```bash
-cargo test
+# Run all tests
+just test
+
+# Run specific test
+just test-one test_name
+```
+
+### Manual Testing
+
+```bash
+# Send a test alert
+just test-alert
+
+# Check operator logs
+kubectl logs -n punching-fist deployment/punching-fist
+```
+
+## Development
+
+### Project Structure
+
+```
+.
+├── crates/
+│   └── operator/          # Main operator code
+│       ├── src/
+│       │   ├── agent/     # LLM agent runtime
+│       │   ├── controllers/ # Kubernetes controllers
+│       │   ├── sources/   # Alert sources
+│       │   ├── workflow/  # Workflow engine
+│       │   └── sinks/     # Output destinations
+│       └── tests/         # Integration tests
+├── charts/                # Helm charts
+└── examples/              # Example configurations
+```
+
+### Building
+
+```bash
+# Build locally
+just build
+
+# Build Docker image
+just docker-build
+
+# Push to registry
+just docker-push
 ```
 
 ## Contributing
 
-We welcome contributions! Please see our [Contributing Guide](CONTRIBUTING.md) for details.
+1. Fork the repository
+2. Create a feature branch
+3. Make your changes
+4. Run tests
+5. Submit a pull request
 
 ## License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
-## Support
-
-For support, please open an issue in the GitHub repository or contact the maintainers. 
+Apache License 2.0 

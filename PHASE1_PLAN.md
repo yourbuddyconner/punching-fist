@@ -152,32 +152,87 @@ Phase 1 transforms the operator from OpenHands integration to the new Source →
 - [ ] Implement output collection from steps
 
 ### Week 5: LLM Agent Runtime
-**Goal**: Implement agent-based investigation capabilities
+**Goal**: Implement agent-based investigation capabilities using Rig
 
 #### Tasks:
-- [ ] Create agent runtime container image:
-  ```dockerfile
-  FROM rust:slim
-  RUN apt-get update && apt-get install -y \
-      kubectl curl jq netcat-openbsd
-  COPY tools/* /usr/local/bin/
+- [ ] Add Rig dependency to Cargo.toml:
+  ```toml
+  [dependencies]
+  rig-core = "0.1"
   ```
-- [ ] Implement LLM client abstraction:
-  - Local LLM support (primary)
-  - Claude API support (fallback)
-- [ ] Build agent reasoning loop:
+- [ ] Create LLM provider abstraction using Rig:
   ```rust
-  loop {
-      // Get LLM to decide next action
-      // Execute tool (kubectl, curl, etc.)
-      // Feed results back to LLM
-      // Check if goal achieved or max iterations
-  }
+  // Support for local, Anthropic, OpenAI, Together providers
+  // Configuration-driven provider selection
+  // Connection pooling and retry logic
   ```
-- [ ] Create tool execution sandbox
-- [ ] Implement structured output parsing
-- [ ] Add safety checks for commands
-- [ ] Build investigation result summarization
+- [ ] Implement tool definitions with Rig:
+  - KubectlTool: Kubernetes API-based command execution
+  - PromQLTool: Prometheus metric queries
+  - CurlTool: HTTP health checks
+  - CustomScriptTool: Shell script execution
+- [ ] Build agent runtime with Rig:
+  ```rust
+  // Agent creation with configured tools
+  // Investigation loop with max iterations
+  // Structured output parsing
+  // Safety checks and approval gates
+  ```
+- [ ] Create agent step executor:
+  - Parse goal and tools from workflow step
+  - Initialize Rig agent with context
+  - Execute reasoning loop
+  - Collect and structure outputs
+- [ ] Implement safety boundaries:
+  - Command validation and sanitization
+  - RBAC-aware tool execution
+  - Approval gates for destructive operations
+- [ ] Add investigation templates:
+  - Pod crash investigation
+  - High resource usage analysis
+  - Network connectivity debugging
+  - Service degradation triage
+- [ ] Create agent result formatting:
+  - Findings summary
+  - Confidence scoring
+  - Action recommendations
+  - Escalation context
+
+#### Implementation Structure:
+```
+crates/operator/src/agent/
+├── mod.rs              # Module exports
+├── provider.rs         # Rig provider abstraction
+├── runtime.rs          # Agent execution engine
+├── tools/              # Tool implementations
+│   ├── mod.rs
+│   ├── kubectl.rs      # Kubernetes commands
+│   ├── promql.rs       # Prometheus queries
+│   ├── curl.rs         # HTTP requests
+│   └── script.rs       # Custom scripts
+├── safety.rs           # Command validation
+├── templates.rs        # Investigation templates
+└── result.rs           # Output formatting
+```
+
+#### Example Agent Configuration:
+```yaml
+apiVersion: punchingfist.io/v1alpha1
+kind: Workflow
+spec:
+  runtime:
+    llmConfig:
+      provider: "local"
+      endpoint: "http://ollama:11434"
+      model: "llama3.1:70b"
+  steps:
+    - name: "investigate-crash"
+      type: "agent"
+      goal: "Investigate why pod is crashing"
+      tools: ["kubectl", "promql"]
+      maxIterations: 10
+      timeout: 5m
+```
 
 ### Week 6: Sink Handlers & Integration
 **Goal**: Implement Slack sink and end-to-end testing

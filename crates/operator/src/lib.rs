@@ -5,7 +5,6 @@ pub mod sources;
 pub mod store;
 pub mod server;
 // pub mod kubernetes;  // Old KubeClient - replaced with kube::Client
-pub mod openhands;
 pub mod scheduler;
 pub mod workflow;
 pub mod agent;
@@ -19,8 +18,8 @@ use uuid;
 pub enum Error {
     #[error("Kubernetes error: {0}")]
     Kubernetes(String),
-    #[error("OpenHands error: {0}")]
-    OpenHands(String),
+    #[error("Agent error: {0}")]
+    Agent(String),
     #[error("Task error: {0}")]
     Task(String),
     #[error("Configuration error: {0}")]

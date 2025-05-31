@@ -153,7 +153,7 @@ impl StepExecutor {
                 match tool_name {
                     "kubectl" => {
                         let kubectl_tool = KubectlTool::new(self.client.clone());
-                        agent_runtime.add_tool("kubectl".to_string(), Arc::new(kubectl_tool));
+                        agent_runtime.add_tool("kubectl".to_string(), kubectl_tool);
                     }
                     "promql" => {
                         let prometheus_url = context.get_metadata("prometheus_url")
@@ -161,15 +161,15 @@ impl StepExecutor {
                             .unwrap_or("http://prometheus:9090")
                             .to_string();
                         let promql_tool = PromQLTool::new(prometheus_url);
-                        agent_runtime.add_tool("promql".to_string(), Arc::new(promql_tool));
+                        agent_runtime.add_tool("promql".to_string(), promql_tool);
                     }
                     "curl" => {
                         let curl_tool = CurlTool::new();
-                        agent_runtime.add_tool("curl".to_string(), Arc::new(curl_tool));
+                        agent_runtime.add_tool("curl".to_string(), curl_tool);
                     }
                     "script" => {
                         let script_tool = ScriptTool::new();
-                        agent_runtime.add_tool("script".to_string(), Arc::new(script_tool));
+                        agent_runtime.add_tool("script".to_string(), script_tool);
                     }
                     _ => {
                         warn!("Unknown tool requested: {}", tool_name);

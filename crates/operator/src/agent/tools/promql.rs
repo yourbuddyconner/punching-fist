@@ -2,10 +2,11 @@
 //! 
 //! Allows agents to query Prometheus metrics for investigation.
 
-use super::{Tool, ToolResult};
+use super::{ToolResult, ToolArgs, ToolError};
 use anyhow::Result;
-use async_trait::async_trait;
 use reqwest::Client;
+use rig::completion::ToolDefinition;
+use rig::tool::Tool as RigTool;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
@@ -93,32 +94,92 @@ impl PromQLTool {
         Ok(result)
     }
     
-    /// Parse the command to determine query type
-    fn parse_command(&self, input: &str) -> Result<PromQLCommand> {
-        // Check if it's a range query (contains time range indicators)
-        if input.contains("[") && input.contains("]") {
-            // Simple range query detection - in production, use proper parsing
-            Ok(PromQLCommand::InstantQuery(input.to_string()))
-        } else {
-            Ok(PromQLCommand::InstantQuery(input.to_string()))
+    /// Execute a PromQL range query
+    async fn range_query(&self, query: &str, start: i64, end: i64, step: &str) -> Result<PrometheusResponse> {
+        let url = format!("{}/api/v1/query_range", self.prometheus_url);
+        
+        let mut request = self.client
+            .get(&url)
+            .query(&[
+                ("query", query),
+                ("start", &start.to_string()),
+                ("end", &end.to_string()),
+                ("step", step),
+            ])
+            .timeout(self.timeout);
+        
+        // Add auth header if token is provided
+        if let Some(token) = &self.auth_token {
+            request = request.header("Authorization", format!("Bearer {}", token));
         }
+        
+        let response = request.send().await?;
+        
+        if !response.status().is_success() {
+            let error_text = response.text().await?;
+            return Err(anyhow::anyhow!("Prometheus query failed: {}", error_text));
+        }
+        
+        let result: PrometheusResponse = response.json().await?;
+        Ok(result)
+    }
+    
+    /// Parse command to determine query type
+    fn parse_command(&self, input: &str) -> Result<PromQLCommand> {
+        // For now, we only support instant queries
+        // TODO: Add support for range queries with time parameters
+        Ok(PromQLCommand::InstantQuery(input.to_string()))
+    }
+    
+    /// Validate if the query is safe to execute
+    fn validate(&self, input: &str) -> Result<()> {
+        // Basic validation - check for common injection attempts
+        if input.contains(';') || input.contains("&&") || input.contains("||") {
+            return Err(anyhow::anyhow!("Invalid characters in PromQL query"));
+        }
+        
+        // Check query length
+        if input.len() > 1000 {
+            return Err(anyhow::anyhow!("Query too long (max 1000 characters)"));
+        }
+        
+        Ok(())
     }
 }
 
-#[async_trait]
-impl Tool for PromQLTool {
-    fn name(&self) -> &str {
-        "promql"
+impl RigTool for PromQLTool {
+    const NAME: &'static str = "promql";
+    
+    type Error = ToolError;
+    type Args = ToolArgs;
+    type Output = ToolResult;
+    
+    async fn definition(&self, _prompt: String) -> ToolDefinition {
+        ToolDefinition {
+            name: Self::NAME.to_string(),
+            description: "Query Prometheus metrics using PromQL. Supports instant queries like \
+                         'up{job=\"kubernetes-pods\"}' or 'rate(http_requests_total[5m])'. \
+                         Returns metric values and labels.".to_string(),
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "command": {
+                        "type": "string",
+                        "description": "The PromQL query to execute (e.g., 'rate(http_requests_total[5m])')"
+                    }
+                },
+                "required": ["command"]
+            }),
+        }
     }
     
-    fn description(&self) -> &str {
-        "Query Prometheus metrics using PromQL. Supports instant queries like \
-         'up{job=\"kubernetes-pods\"}' or 'rate(http_requests_total[5m])'. \
-         Returns metric values and labels."
-    }
-    
-    async fn execute(&self, input: &str) -> Result<ToolResult> {
-        match self.parse_command(input) {
+    async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
+        // Validate the query
+        self.validate(&args.command)
+            .map_err(|e| ToolError::ValidationError(e.to_string()))?;
+        
+        // Execute the query
+        match self.parse_command(&args.command) {
             Ok(PromQLCommand::InstantQuery(query)) => {
                 match self.query(&query).await {
                     Ok(response) => {
@@ -127,7 +188,7 @@ impl Tool for PromQLTool {
                             success: true,
                             output,
                             error: None,
-                            metadata: Some(serde_json::to_value(&response)?),
+                            metadata: Some(serde_json::to_value(&response).unwrap()),
                         })
                     }
                     Err(e) => Ok(ToolResult {
@@ -145,20 +206,6 @@ impl Tool for PromQLTool {
                 metadata: None,
             }),
         }
-    }
-    
-    fn validate(&self, input: &str) -> Result<()> {
-        // Basic validation - check for common injection attempts
-        if input.contains(';') || input.contains("&&") || input.contains("||") {
-            return Err(anyhow::anyhow!("Invalid characters in PromQL query"));
-        }
-        
-        // Check query length
-        if input.len() > 1000 {
-            return Err(anyhow::anyhow!("Query too long (max 1000 characters)"));
-        }
-        
-        Ok(())
     }
 }
 

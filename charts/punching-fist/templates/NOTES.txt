@@ -8,6 +8,19 @@ To verify that the operator is running:
 
 The operator is now listening for webhook alerts on port {{ .Values.server.port }} at the endpoint /webhook/alerts.
 
+{{- if .Values.testResources.enabled }}
+
+TEST RESOURCES DEPLOYED:
+Test workloads have been deployed to the {{ .Values.testResources.namespace }} namespace:
+  - healthy-app: Normal functioning nginx pod
+  - memory-hog: Pod consuming excessive memory  
+  - crashloop-app: Pod that crashes every 10 seconds
+  - cpu-intensive: Pod with high CPU usage
+
+To view test pods:
+  kubectl get pods -n {{ .Values.testResources.namespace }}
+{{- end }}
+
 To configure the operator, you can modify the values in your values.yaml file or use the --set flag with helm upgrade.
 
 For more information about the operator, visit:

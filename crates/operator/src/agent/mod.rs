@@ -13,4 +13,4 @@ pub mod result;
 pub use provider::{LLMProvider, LLMConfig};
 pub use runtime::AgentRuntime;
 pub use result::{AgentResult, Finding};
-pub use tools::{Tool, ToolResult}; 
+pub use tools::{ToolResult, ToolArgs, ToolError}; 

@@ -36,7 +36,7 @@ pub struct Config {
     pub server: ServerConfig,
     pub database: DatabaseConfig,
     pub kube: KubeConfig,
-    pub openhands: OpenHandsConfig,
+    pub agent: AgentConfig,
     #[serde(default)]
     pub execution: ExecutionConfig,
 }
@@ -53,15 +53,26 @@ pub struct KubeConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct OpenHandsConfig {
-    pub api_key: String,
-    pub default_model: String,
+pub struct AgentConfig {
+    pub provider: String,
+    pub model: String,
+    pub temperature: Option<f32>,
+    pub max_tokens: Option<u32>,
 }
 
 impl Config {
     pub fn load() -> crate::Result<Self> {
         // Load environment variables from .env file if it exists
         let _ = dotenvy::dotenv();
+        
+        // Determine which LLM provider to use based on available API keys
+        let (provider, has_api_key) = if std::env::var("ANTHROPIC_API_KEY").is_ok() {
+            ("anthropic".to_string(), true)
+        } else if std::env::var("OPENAI_API_KEY").is_ok() {
+            ("openai".to_string(), true)
+        } else {
+            ("mock".to_string(), false)
+        };
         
         // Create config from environment variables with defaults
         let config = Config {
@@ -90,11 +101,20 @@ impl Config {
                 service_account: std::env::var("KUBE_SERVICE_ACCOUNT")
                     .unwrap_or_else(|_| "punching-fist".to_string()),
             },
-            openhands: OpenHandsConfig {
-                api_key: std::env::var("LLM_API_KEY")
-                    .unwrap_or_else(|_| "".to_string()),
-                default_model: std::env::var("LLM_MODEL")
-                    .unwrap_or_else(|_| "anthropic/claude-3-5-sonnet-20241022".to_string()),
+            agent: AgentConfig {
+                provider: std::env::var("LLM_PROVIDER")
+                    .unwrap_or_else(|_| provider),
+                model: std::env::var("LLM_MODEL")
+                    .unwrap_or_else(|_| match std::env::var("LLM_PROVIDER").as_deref() {
+                        Ok("openai") => "gpt-4".to_string(),
+                        _ => "claude-3-5-sonnet".to_string(),
+                    }),
+                temperature: std::env::var("LLM_TEMPERATURE")
+                    .ok()
+                    .and_then(|v| v.parse().ok()),
+                max_tokens: std::env::var("LLM_MAX_TOKENS")
+                    .ok()
+                    .and_then(|v| v.parse().ok()),
             },
             execution: ExecutionConfig {
                 mode: match std::env::var("EXECUTION_MODE")
@@ -109,8 +129,8 @@ impl Config {
         };
 
         // Validate required fields
-        if config.openhands.api_key.is_empty() {
-            tracing::warn!("LLM_API_KEY is not set. OpenHands functionality may not work properly.");
+        if !has_api_key && config.agent.provider != "mock" {
+            tracing::warn!("No LLM API key found (ANTHROPIC_API_KEY or OPENAI_API_KEY). Using mock provider for testing.");
         }
 
         // Validate database configuration
@@ -150,9 +170,11 @@ impl Default for Config {
                 namespace: "default".to_string(),
                 service_account: "punching-fist".to_string(),
             },
-            openhands: OpenHandsConfig {
-                api_key: "".to_string(),
-                default_model: "anthropic/claude-3-5-sonnet-20241022".to_string(),
+            agent: AgentConfig {
+                provider: "mock".to_string(),
+                model: "claude-3-5-sonnet".to_string(),
+                temperature: Some(0.7),
+                max_tokens: Some(4096),
             },
             execution: ExecutionConfig::default(),
         }

@@ -1,6 +1,5 @@
 use std::sync::Arc;
 use crate::{
-    openhands::OpenHandsClient,
     server::Alert,
     store::Store,
     TaskMetrics,
@@ -10,7 +9,6 @@ use crate::{
 
 pub struct TaskScheduler {
     kube_client: kube::Client,
-    openhands_client: Arc<OpenHandsClient>,
     store: Arc<dyn Store>,
     metrics: TaskMetrics,
     execution_mode: TaskExecutionMode,
@@ -19,13 +17,11 @@ pub struct TaskScheduler {
 impl TaskScheduler {
     pub fn new(
         kube_client: kube::Client,
-        openhands_client: Arc<OpenHandsClient>,
         store: Arc<dyn Store>,
         execution_mode: TaskExecutionMode,
     ) -> Self {
         Self {
             kube_client,
-            openhands_client,
             store,
             metrics: TaskMetrics::default(),
             execution_mode,

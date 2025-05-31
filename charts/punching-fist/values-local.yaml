@@ -4,36 +4,30 @@
 # Global settings for local development
 global:
   image:
-    repository: punching-fist
-    tag: latest
-    pullPolicy: Never  # Use local images only
+    repository: ttl.sh/punching-fist-operator
+    tag: "2h"
+    pullPolicy: Always
 
 # Operator configuration
 operator:
   replicaCount: 1
   resources:
     limits:
-      cpu: 500m
-      memory: 512Mi
+      cpu: 200m
+      memory: 256Mi
     requests:
-      cpu: 100m
-      memory: 128Mi
+      cpu: 50m
+      memory: 64Mi
 
 # Server configuration
 server:
   port: 8080
   host: "0.0.0.0"
 
-# OpenHands configuration
-openhands:
-  enabled: true
-  apiKey: ""  # Set via --set openhands.apiKey=your_key or use deploy-local-with-key command
-  model: "anthropic/claude-3-5-sonnet-20241022"
-
 # Persistence configuration for SQLite database
 persistence:
   enabled: true
-  size: 1Gi
+  size: 500Mi
   storageClass: ""  # Use default storage class for local development
   accessMode: ReadWriteOnce
 
@@ -41,7 +35,8 @@ persistence:
 prometheus:
   enabled: true
   serviceMonitor:
-    enabled: false  # Disable for local development unless you have prometheus operator
+    enabled: true  # Enable ServiceMonitor since we have prometheus-operator
+    interval: 15s
 
 # Security configuration
 security:
@@ -74,4 +69,62 @@ containerSecurityContext:
   runAsNonRoot: true
   capabilities:
     drop:
-      - ALL 
+      - ALL
+
+# Test resources configuration - enabled for local development
+testResources:
+  enabled: true  # Deploy test workloads automatically
+  namespace: test-workloads
+
+# Prometheus Stack configuration - enabled for local development
+prometheus-stack:
+  enabled: true
+  prometheus:
+    prometheusSpec:
+      # Smaller resources for local development
+      resources:
+        requests:
+          memory: 200Mi
+          cpu: 50m
+        limits:
+          memory: 400Mi
+          cpu: 200m
+      # Smaller storage for local
+      storageSpec:
+        volumeClaimTemplate:
+          spec:
+            accessModes: ["ReadWriteOnce"]
+            resources:
+              requests:
+                storage: 500Mi
+      # Shorter retention for local
+      retention: 1d
+      # Select all service monitors
+      serviceMonitorSelector: {}
+      # NodePort for easy access from host
+      service:
+        type: NodePort
+        nodePort: 30090
+  # Minimal components for local testing
+  alertmanager:
+    enabled: false
+  grafana:
+    enabled: false
+  kubeStateMetrics:
+    enabled: true
+  nodeExporter:
+    enabled: false
+  pushgateway:
+    enabled: false
+
+# Agent configuration
+agent:
+  # Default to mock provider for local testing without API keys
+  provider: "mock"  
+  anthropicApiKey: ""  # Set via --set agent.anthropicApiKey=your_key or use deploy-local-with-key command
+  openaiApiKey: ""     # Set via --set agent.openaiApiKey=your_key
+
+# Use NodePort for easier local access
+service:
+  type: NodePort
+  nodePort: 30080 

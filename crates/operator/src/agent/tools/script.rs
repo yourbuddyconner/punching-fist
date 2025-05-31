@@ -2,9 +2,10 @@
 //! 
 //! Allows agents to execute pre-defined custom scripts.
 
-use super::{Tool, ToolResult};
+use super::{ToolResult, ToolArgs, ToolError};
 use anyhow::Result;
-use async_trait::async_trait;
+use rig::completion::ToolDefinition;
+use rig::tool::Tool as RigTool;
 use std::collections::HashMap;
 
 /// Script tool for custom script execution
@@ -23,31 +24,48 @@ impl ScriptTool {
         self.available_scripts.insert(name, path);
         self
     }
-}
-
-#[async_trait]
-impl Tool for ScriptTool {
-    fn name(&self) -> &str {
-        "script"
-    }
-    
-    fn description(&self) -> &str {
-        "Execute pre-defined diagnostic scripts. \
-         Available scripts: debug-pod, check-network, analyze-logs"
-    }
-    
-    async fn execute(&self, input: &str) -> Result<ToolResult> {
-        // TODO: Implement actual script execution
-        Ok(ToolResult {
-            success: true,
-            output: format!("Script tool called with: {}", input),
-            error: None,
-            metadata: None,
-        })
-    }
     
     fn validate(&self, input: &str) -> Result<()> {
         // TODO: Validate script name exists
         Ok(())
+    }
+}
+
+impl RigTool for ScriptTool {
+    const NAME: &'static str = "script";
+    
+    type Error = ToolError;
+    type Args = ToolArgs;
+    type Output = ToolResult;
+    
+    async fn definition(&self, _prompt: String) -> ToolDefinition {
+        ToolDefinition {
+            name: Self::NAME.to_string(),
+            description: "Execute pre-defined diagnostic scripts. \
+                         Available scripts: debug-pod, check-network, analyze-logs".to_string(),
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "command": {
+                        "type": "string",
+                        "description": "The script name to execute (e.g., 'debug-pod')"
+                    }
+                },
+                "required": ["command"]
+            }),
+        }
+    }
+    
+    async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
+        self.validate(&args.command)
+            .map_err(|e| ToolError::ValidationError(e.to_string()))?;
+        
+        // TODO: Implement actual script execution
+        Ok(ToolResult {
+            success: true,
+            output: format!("Script tool called with: {}", args.command),
+            error: None,
+            metadata: None,
+        })
     }
 } 
