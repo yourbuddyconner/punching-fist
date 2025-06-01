@@ -9,6 +9,7 @@ use rig::tool::Tool as RigTool;
 use std::collections::HashMap;
 
 /// Script tool for custom script execution
+#[derive(Clone)]
 pub struct ScriptTool {
     available_scripts: HashMap<String, String>,
 }

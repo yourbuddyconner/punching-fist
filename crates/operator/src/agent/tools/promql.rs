@@ -11,6 +11,7 @@ use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
 /// PromQL tool for querying Prometheus
+#[derive(Clone)]
 pub struct PromQLTool {
     prometheus_url: String,
     client: Client,

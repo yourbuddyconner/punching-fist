@@ -8,6 +8,7 @@ use rig::completion::ToolDefinition;
 use rig::tool::Tool as RigTool;
 
 /// Curl tool for HTTP requests
+#[derive(Clone)]
 pub struct CurlTool {
     allowed_domains: Vec<String>,
 }
