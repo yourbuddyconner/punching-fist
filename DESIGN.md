@@ -342,6 +342,22 @@ spec:
       ai_triage: "{{ .workflow.outputs.recommendations }}"
       ai_severity: "{{ .workflow.outputs.severity-assessment }}"
       ai_timestamp: "{{ .workflow.completedAt }}"
+---
+apiVersion: punchingfist.io/v1alpha1
+kind: Sink
+metadata:
+  name: stdout-debug
+spec:
+  type: stdout
+  config:
+    format: "json" # or "text"
+    template: | # Optional, for text format
+      Debug Output for Workflow {{ .workflow.name }}:
+      Source: {{ .source.name }}
+      Alert: {{ .source.data.alert.alertname }}
+      Investigation Summary:
+      {{ .workflow.outputs.investigation_summary }}
+      ---
 ```
 
 ### OperatorConfig
@@ -607,6 +623,21 @@ type: workflow
 config:
   workflowName: "escalation-workflow"
   triggerCondition: "severity == 'critical'"
+```
+
+#### **stdout**
+```yaml
+type: stdout
+config:
+  format: "json"  # Output format: "json" or "text"
+  pretty: true    # For json output, whether to pretty print
+  template: |     # For text output, a Go template string
+    Workflow {{ .workflow.name }} completed.
+    Status: {{ .workflow.status }}
+    Outputs:
+    {{ range $key, $value := .workflow.outputs }}
+      {{ $key }}: {{ $value }}
+    {{ end }}
 ```
 
 ## Rig Integration Architecture
@@ -1093,6 +1124,86 @@ spec:
     authMethod: "managed-identity"
     clientId: "12345678-1234-1234-1234-123456789012"
 ```
+
+## Deployment Architecture
+
+### Helm-Based Deployment
+
+**Important**: All CRDs, operator resources, and test workloads are managed through the Helm chart. This provides a unified deployment experience and ensures consistent configuration across environments.
+
+#### **Helm Chart Structure**
+```
+charts/punching-fist/
+├── Chart.yaml              # Chart metadata
+├── Chart.lock              # Dependency versions
+├── values.yaml             # Production values
+├── values-local.yaml       # Local development values
+├── crds/                   # CRDs deployed automatically by Helm
+│   └── *.yaml              # Source, Workflow, Sink CRDs
+├── templates/
+│   ├── statefulset.yaml    # Operator deployment
+│   ├── service.yaml        # Service exposure
+│   ├── rbac.yaml           # RBAC resources
+│   ├── secret.yaml         # Secret management
+│   ├── servicemonitor.yaml # Prometheus integration
+│   └── tests/
+│       ├── test-namespace.yaml  # Test namespace
+│       └── test-pods.yaml       # Test workloads
+└── charts/                 # Subcharts (prometheus-stack)
+```
+
+#### **CRD Management**
+**Important**: CRDs are now included in the Helm chart's `crds/` directory and are automatically installed/upgraded by Helm 3. No manual CRD installation is required.
+
+```bash
+# CRDs are automatically installed with:
+helm install punching-fist charts/punching-fist
+
+# To see installed CRDs:
+kubectl get crds | grep punchingfist
+```
+
+#### **Test Resources**
+The Helm chart includes test workloads that simulate various failure scenarios:
+- **healthy-app**: Normal functioning pod
+- **memory-hog**: Pod with high memory usage
+- **crashloop-app**: Pod that crashes periodically
+- **cpu-intensive**: Pod with high CPU usage
+
+These are automatically deployed when `testResources.enabled: true` in values.
+
+#### **Local Development Deployment**
+```bash
+# Using Justfile commands
+just test-deploy  # Deploys everything including test resources
+
+# Or manually with Helm
+helm install punching-fist charts/punching-fist \
+  --values charts/punching-fist/values-local.yaml \
+  --set agent.anthropicApiKey=$ANTHROPIC_API_KEY \
+  --namespace punching-fist \
+  --create-namespace
+```
+
+#### **Production Deployment**
+```bash
+# Deploy CRDs
+kubectl apply -f deploy/crds/phase1-crds.yaml
+
+# Deploy operator
+helm install punching-fist charts/punching-fist \
+  --values production-values.yaml \
+  --namespace punching-fist-system \
+  --create-namespace
+```
+
+#### **Configuration Management**
+All operator configuration is managed through Helm values:
+- **Provider Selection**: `agent.provider` (anthropic, openai, local)
+- **API Keys**: Via secrets or direct values
+- **Resource Limits**: Configurable per environment
+- **Test Resources**: Enable/disable test workloads
+- **Prometheus Stack**: Bundled monitoring setup
 
 ## Implementation Phases
 

@@ -65,6 +65,7 @@ reqwest.workspace = true
 
 # Metrics
 prometheus.workspace = true
+lazy_static.workspace = true
 
 # Time handling
 chrono.workspace = true
@@ -92,4 +93,5 @@ rig-core = "0.12"
 
 [dev-dependencies]
 tokio-test.workspace = true
-mockall.workspace = true 
+mockall.workspace = true
+axum-test = "17.3.0"

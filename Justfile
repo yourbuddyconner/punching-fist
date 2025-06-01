@@ -166,18 +166,23 @@ test-helm-deps:
     @echo "Updating helm dependencies..."
     cd charts/punching-fist && helm dependency update
 
-# Deploy operator to current k8s context using Helm
+# Deploy CRDs to current k8s context using Helm
 # Usage: `just test-deploy-operator`
 test-deploy-operator: test-build-operator test-helm-deps
     @echo "Deploying operator with Helm to current context..."
     @echo "Current context: `kubectl config current-context`"
+    @if [ -z "{{env_var_or_default("ANTHROPIC_API_KEY", "")}}" ]; then \
+        echo "Error: ANTHROPIC_API_KEY is not set. Please create a .env file with this variable."; \
+        exit 1; \
+    fi
     helm upgrade --install punching-fist ./charts/punching-fist \
         --values ./charts/punching-fist/values-local.yaml \
+        --set agent.anthropicApiKey={{env_var("ANTHROPIC_API_KEY")}} \
         --namespace punching-fist \
         --create-namespace \
         --wait
     @echo "Operator deployed successfully!"
-    @echo "Note: If using NodePort, Prometheus UI may be available at: http://localhost:30090"
+    @echo "Note: CRDs are automatically installed by Helm"
 
 # Run the test_rig_tools example against current context
 # Usage: `just test-run-example`
@@ -232,4 +237,95 @@ test-cleanup:
 # Show available commands
 # Usage: `just help`
 help:
-    @just --list 
+    @just --list
+
+# === E2E TEST COMMANDS ===
+
+# Deploy complete e2e test environment
+# Usage: `just e2e-deploy`
+e2e-deploy: test-deploy
+    @echo ""
+    @echo "🎉 E2E test environment deployed!"
+    @echo ""
+    @echo "Test pods will start generating alerts after a few minutes."
+    @echo "Use the following commands to monitor the e2e flow:"
+    @echo "  just e2e-status     - Check all components status"
+    @echo "  just e2e-alerts     - View active Prometheus alerts"
+    @echo "  just e2e-logs       - View punching-fist operator logs"
+    @echo "  just e2e-trigger    - Manually trigger a test alert"
+
+# Check e2e test status
+# Usage: `just e2e-status`
+e2e-status:
+    @echo "=== Test Workloads ==="
+    kubectl get pods -n test-workloads
+    @echo ""
+    @echo "=== Punching Fist Resources ==="
+    kubectl get sources,workflows,sinks -n punching-fist
+    @echo ""
+    @echo "=== Alert Status ==="
+    -@kubectl exec -n punching-fist prometheus-punching-fist-prometheus-s-prometheus-0 -- \
+        promtool query instant http://localhost:9090 'ALERTS{namespace="test-workloads"}' | grep -E "(alertname|alertstate|severity)" || echo "No active test alerts"
+
+# View active alerts
+# Usage: `just e2e-alerts`
+e2e-alerts:
+    @echo "Checking Prometheus for active test alerts..."
+    kubectl port-forward -n punching-fist svc/punching-fist-prometheus-s-prometheus 9090:9090 &
+    @sleep 2
+    @curl -s http://localhost:9090/api/v1/alerts | jq '.data.alerts[] | select(.labels.namespace=="test-workloads") | {alert: .labels.alertname, state: .state, severity: .labels.severity, pod: .labels.pod}'
+    @pkill -f "port-forward.*9090:9090" || true
+
+# View operator logs for e2e testing
+# Usage: `just e2e-logs`
+e2e-logs:
+    @echo "Viewing punching-fist operator logs..."
+    kubectl logs -f statefulset/punching-fist -n punching-fist
+
+# Port forward to AlertManager
+# Usage: `just e2e-alertmanager`
+e2e-alertmanager:
+    @echo "Port forwarding to AlertManager at http://localhost:9093..."
+    kubectl port-forward -n punching-fist svc/punching-fist-prometheus-s-alertmanager 9093:9093
+
+# Manually trigger a test alert via AlertManager API
+# Usage: `just e2e-trigger`
+e2e-trigger:
+    @echo "Sending test alert to AlertManager..."
+    @kubectl port-forward -n punching-fist svc/punching-fist-prometheus-s-alertmanager 9093:9093 &
+    @sleep 2
+    @curl -XPOST http://localhost:9093/api/v1/alerts \
+        -H "Content-Type: application/json" \
+        -d '[{"labels": {"alertname": "TestPodCrashLooping", "severity": "critical", "namespace": "test-workloads", "pod": "manual-test-pod"}, "annotations": {"description": "Manual test alert: Pod manual-test-pod is crash looping", "summary": "Test pod is crash looping"}}]'
+    @pkill -f "port-forward.*9093:9093" || true
+    @echo ""
+    @echo "✓ Test alert sent! Check logs with 'just e2e-logs'"
+
+# View workflow executions
+# Usage: `just e2e-workflows`
+e2e-workflows:
+    @echo "=== Workflow Executions ==="
+    kubectl get workflowexecutions -n punching-fist -o wide
+    @echo ""
+    @echo "To view details of a specific execution:"
+    @echo "kubectl describe workflowexecution <name> -n punching-fist"
+
+# Restart crashloop pod to trigger alerts
+# Usage: `just e2e-restart-crashloop`
+e2e-restart-crashloop:
+    @echo "Deleting crashloop pod to trigger restart alerts..."
+    kubectl delete pod crashloop-app -n test-workloads --force --grace-period=0 || true
+    kubectl apply -f charts/punching-fist/templates/tests/test-pods.yaml
+    @echo "✓ Crashloop pod restarted. Alerts should fire in ~2-5 minutes."
+
+# Clean up e2e test resources only (keep operator)
+# Usage: `just e2e-clean-tests`
+e2e-clean-tests:
+    @echo "Cleaning up test resources..."
+    kubectl delete namespace test-workloads || true
+    kubectl delete sources,workflows,sinks -l test-resources=true -n punching-fist || true
+
+# Full e2e cleanup
+# Usage: `just e2e-cleanup`
+e2e-cleanup: test-cleanup
+    @echo "E2E test environment cleaned up" 

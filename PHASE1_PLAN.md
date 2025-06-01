@@ -235,24 +235,24 @@ spec:
 ```
 
 ### Week 6: Sink Handlers & Integration
-**Goal**: Implement Slack sink and end-to-end testing
+**Goal**: Implement `stdout` sink for testing and end-to-end testing
 
 #### Tasks:
 - [ ] Create Sink controller that watches Sink CRs
-- [ ] Implement Slack sink handler:
-  - Message formatting with templates
-  - Channel posting
-  - Thread support for updates
-- [ ] Implement AlertManager annotation sink
+- [ ] Implement `stdout` sink handler:
+  - Takes workflow output context
+  - Prints formatted output to standard output
+  - Add basic template support for formatting (optional for MVP)
+- [ ] Implement AlertManager annotation sink (if time permits, or move to Phase 2)
 - [ ] Add sink condition evaluation
 - [ ] Create end-to-end test scenarios:
   ```yaml
-  # Test: High CPU alert → Investigation → Slack notification
-  # Test: Pod crash loop → Auto-resolution → Alert resolved
-  # Test: Unknown issue → Enriched context → Escalation
+  # Test: High CPU alert → Investigation → Stdout notification
+  # Test: Pod crash loop → Auto-resolution → Alert resolved (if auto-resolution part of phase 1)
+  # Test: Unknown issue → Enriched context → Stdout output
   ```
-- [ ] Documentation and deployment guide
-- [ ] Performance testing and optimization
+- [ ] Documentation and deployment guide (basic for `stdout` sink)
+- [ ] Performance testing and optimization (basic checks)
 
 ## Key Implementation Files Structure
 
@@ -288,7 +288,8 @@ crates/operator/src/
 │   └── safety.rs     # Safety checks
 ├── sinks/             # Sink implementations
 │   ├── mod.rs
-│   ├── slack.rs      # Slack integration
+│   ├── stdout.rs     # Stdout sink for testing
+│   ├── slack.rs      # Slack integration (deferred)
 │   ├── alertmanager.rs # AlertManager updates
 │   └── templates.rs  # Template engine
 ├── store/            # Database layer

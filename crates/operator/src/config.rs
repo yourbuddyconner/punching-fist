@@ -13,7 +13,7 @@ pub enum TaskExecutionMode {
 
 impl Default for TaskExecutionMode {
     fn default() -> Self {
-        TaskExecutionMode::Local
+        TaskExecutionMode::Kubernetes
     }
 }
 
@@ -26,7 +26,7 @@ pub struct ExecutionConfig {
 impl Default for ExecutionConfig {
     fn default() -> Self {
         Self {
-            mode: TaskExecutionMode::Local,
+            mode: TaskExecutionMode::Kubernetes,
         }
     }
 }
@@ -118,7 +118,7 @@ impl Config {
             },
             execution: ExecutionConfig {
                 mode: match std::env::var("EXECUTION_MODE")
-                    .unwrap_or_else(|_| "local".to_string())
+                    .unwrap_or_else(|_| "kubernetes".to_string())
                     .to_lowercase()
                     .as_str()
                 {

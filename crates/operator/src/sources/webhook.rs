@@ -23,11 +23,12 @@ pub struct WebhookConfig {
     pub filters: HashMap<String, Vec<String>>,
     pub workflow_name: String,
     pub trigger_workflow: Option<String>,
+    pub namespace: String,
 }
 
 pub struct WebhookHandler {
     store: Arc<dyn Store>,
-    client: Client,
+    client: Option<Client>,
     webhook_configs: Arc<RwLock<HashMap<String, WebhookConfig>>>,
     workflow_engine: Option<Arc<WorkflowEngine>>,
 }
@@ -66,7 +67,7 @@ pub struct AlertManagerAlert {
 }
 
 impl WebhookHandler {
-    pub fn new(store: Arc<dyn Store>, client: Client) -> Self {
+    pub fn new(store: Arc<dyn Store>, client: Option<Client>) -> Self {
         Self {
             store,
             client,
@@ -87,6 +88,7 @@ impl WebhookHandler {
         filters: HashMap<String, Vec<String>>,
         workflow_name: String,
         trigger_workflow: Option<String>,
+        namespace: String,
     ) -> Result<()> {
         let mut webhooks = self.webhook_configs.write().await;
         
@@ -96,6 +98,7 @@ impl WebhookHandler {
             filters,
             workflow_name,
             trigger_workflow,
+            namespace,
         };
 
         info!("Registered webhook for source {} at path {}", source_name, path);
@@ -203,11 +206,30 @@ impl WebhookHandler {
 
             self.store.save_source_event(source_event).await?;
             
-            // TODO: Trigger workflow execution
-            info!(
-                "Should trigger workflow {} for alert {}",
-                webhook_config.workflow_name, alert_id
-            );
+            // Trigger workflow execution if configured
+            if webhook_config.trigger_workflow.is_some() || !webhook_config.workflow_name.is_empty() {
+                // Fetch the full alert object from store
+                let alert = self.store.get_alert(alert_id).await?
+                    .ok_or_else(|| crate::Error::NotFound(format!("Alert {} not found", alert_id)))?;
+                
+                // Determine which workflow to trigger
+                let workflow_to_trigger = webhook_config.trigger_workflow
+                    .as_ref()
+                    .unwrap_or(&webhook_config.workflow_name);
+                
+                // Trigger the workflow
+                if let Err(e) = self.trigger_workflow(workflow_to_trigger, &webhook_config.namespace, &alert).await {
+                    warn!(
+                        "Failed to trigger workflow {} for alert {}: {}",
+                        workflow_to_trigger, alert_id, e
+                    );
+                } else {
+                    info!(
+                        "Successfully triggered workflow {} for alert {}",
+                        workflow_to_trigger, alert_id
+                    );
+                }
+            }
         }
 
         Ok(processed_alert_ids)
@@ -218,6 +240,12 @@ impl WebhookHandler {
         alert: &AlertManagerAlert,
         filters: &HashMap<String, Vec<String>>,
     ) -> bool {
+        // If no filters are configured, accept all alerts
+        if filters.is_empty() {
+            return true;
+        }
+        
+        // Otherwise, apply filtering logic
         for (key, allowed_values) in filters {
             if let Some(alert_value) = alert.labels.get(key) {
                 if !allowed_values.contains(alert_value) {
@@ -244,11 +272,13 @@ impl WebhookHandler {
         }
     }
 
-    async fn trigger_workflow(&self, workflow_name: &str, alert: &Alert) -> Result<()> {
-        info!("Triggering workflow {} for alert {}", workflow_name, alert.id);
+    async fn trigger_workflow(&self, workflow_name: &str, namespace: &str, alert: &Alert) -> Result<()> {
+        info!("Triggering workflow {} in namespace {} for alert {}", workflow_name, namespace, alert.id);
         
         // Get workflow from Kubernetes
-        let api: kube::Api<Workflow> = kube::Api::all(self.client.clone());
+        let client = self.client.as_ref()
+            .ok_or_else(|| crate::Error::Kubernetes("Kubernetes client not available".to_string()))?;
+        let api: kube::Api<Workflow> = kube::Api::namespaced(client.clone(), namespace);
         
         let workflow = api.get(workflow_name).await
             .map_err(|e| crate::Error::Kubernetes(format!("Failed to get workflow {}: {}", workflow_name, e)))?;

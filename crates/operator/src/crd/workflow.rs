@@ -45,8 +45,9 @@ pub struct LLMConfig {
     /// LLM provider (local, claude, openai)
     pub provider: String,
     
-    /// Endpoint URL for the LLM
-    pub endpoint: String,
+    /// Endpoint URL for the LLM (only needed for local/custom providers)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub endpoint: Option<String>,
     
     /// Model to use
     pub model: String,

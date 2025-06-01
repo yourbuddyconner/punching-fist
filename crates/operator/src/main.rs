@@ -1,11 +1,9 @@
 use std::sync::Arc;
-use std::sync::Mutex;
 use tracing::{info, warn};
 
 use punching_fist_operator::{
     config::{Config, TaskExecutionMode},
-    controllers::{SourceController, WorkflowController},
-    scheduler::TaskScheduler,
+    controllers::{SourceController, WorkflowController, SinkController},
     server::Server,
     sources::WebhookHandler,
     store::create_store,
@@ -97,7 +95,7 @@ async fn main() -> Result<()> {
     
     // Create webhook handler with workflow engine
     let webhook_handler = Arc::new(
-        WebhookHandler::new(store.clone(), kube_client.clone())
+        WebhookHandler::new(store.clone(), Some(kube_client.clone()))
             .with_workflow_engine(workflow_engine.clone())
     );
 
@@ -121,11 +119,23 @@ async fn main() -> Result<()> {
                 }
             });
             
+            // Create sink controller
+            let sink_controller = Arc::new(SinkController::new(kube_client.clone()));
+            
+            // Start sink controller
+            let controller = sink_controller.clone();
+            tokio::spawn(async move {
+                if let Err(e) = controller.run().await {
+                    tracing::error!("Sink controller error: {}", e);
+                }
+            });
+            
             // Start workflow controller  
             let workflow_controller = Arc::new(WorkflowController::new(
                 kube_client.clone(),
                 store.clone(),
                 workflow_engine.clone(),
+                sink_controller,
             ));
             let controller = workflow_controller.clone();
             tokio::spawn(async move {
@@ -137,18 +147,9 @@ async fn main() -> Result<()> {
         }
     }
 
-    // Initialize scheduler (legacy - will be fully removed later)
-    info!("Initializing task scheduler (legacy)...");
-    let scheduler = Arc::new(Mutex::new(TaskScheduler::new(
-        kube_client.clone(),
-        store.clone(),
-        config.execution.mode.clone(),
-    )));
-    info!("Task scheduler initialized successfully");
-
     // Initialize server
     info!("Initializing HTTP server...");
-    let server = Server::new(&config, scheduler.clone(), store.clone(), webhook_handler.clone());
+    let server = Server::new(&config, store.clone(), webhook_handler.clone());
     let app = server.build_router();
 
     // Start server

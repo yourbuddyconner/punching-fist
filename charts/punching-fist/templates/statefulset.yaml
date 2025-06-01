@@ -106,6 +106,8 @@ spec:
               value: "sqlite"
             - name: EXECUTION_MODE
               value: {{ .Values.executionMode | quote }}
+            - name: STATIC_FILE_PATH
+              value: {{ .Values.server.staticFilePath | default "/usr/local/share/punching-fist/static" | quote }}
           volumeMounts:
             - name: database-storage
               mountPath: /app/data

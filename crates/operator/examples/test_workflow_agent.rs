@@ -89,7 +89,7 @@ fn create_test_workflow() -> Workflow {
                 image: "busybox:latest".to_string(),
                 llm_config: CrdLLMConfig {
                     provider: "mock".to_string(),
-                    endpoint: "http://mock-endpoint".to_string(),  // Provide a default endpoint
+                    endpoint: Some("http://mock-endpoint".to_string()),  // Provide a default endpoint
                     model: "mock-model".to_string(),
                     api_key_secret: None,
                 },

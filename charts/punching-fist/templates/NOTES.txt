@@ -14,7 +14,7 @@ TEST RESOURCES DEPLOYED:
 Test workloads have been deployed to the {{ .Values.testResources.namespace }} namespace:
   - healthy-app: Normal functioning nginx pod
   - memory-hog: Pod consuming excessive memory  
-  - crashloop-app: Pod that crashes every 10 seconds
+  - crashloop-app: Pod that crashes after 5 minutes (delayed to prevent deployment timeout)
   - cpu-intensive: Pod with high CPU usage
 
 To view test pods:
@@ -25,3 +25,61 @@ To configure the operator, you can modify the values in your values.yaml file or
 
 For more information about the operator, visit:
 https://github.com/yourusername/punching-fist-operator 
+
+1. Get the application URL by running these commands:
+{{- if contains "NodePort" .Values.service.type }}
+  export NODE_PORT=$(kubectl get --namespace {{ .Release.Namespace }} -o jsonpath="{.spec.ports[0].nodePort}" services {{ include "punching-fist.fullname" . }})
+  export NODE_IP=$(kubectl get nodes --namespace {{ .Release.Namespace }} -o jsonpath="{.items[0].status.addresses[0].address}")
+  echo http://$NODE_IP:$NODE_PORT
+{{- else if contains "LoadBalancer" .Values.service.type }}
+     NOTE: It may take a few minutes for the LoadBalancer IP to be available.
+           You can watch the status of by running 'kubectl get --namespace {{ .Release.Namespace }} svc -w {{ include "punching-fist.fullname" . }}'
+  export SERVICE_IP=$(kubectl get svc --namespace {{ .Release.Namespace }} {{ include "punching-fist.fullname" . }} --template "{{"{{ range (index .status.loadBalancer.ingress 0) }}{{.}}{{ end }}"}}")
+  echo http://$SERVICE_IP:{{ .Values.service.port }}
+{{- else if contains "ClusterIP" .Values.service.type }}
+  export POD_NAME=$(kubectl get pods --namespace {{ .Release.Namespace }} -l "app.kubernetes.io/name={{ include "punching-fist.name" . }},app.kubernetes.io/instance={{ .Release.Name }}" -o jsonpath="{.items[0].metadata.name}")
+  export CONTAINER_PORT=$(kubectl get pod --namespace {{ .Release.Namespace }} $POD_NAME -o jsonpath="{.spec.containers[0].ports[0].containerPort}")
+  echo "Visit http://127.0.0.1:8080 to use your application"
+  kubectl --namespace {{ .Release.Namespace }} port-forward $POD_NAME 8080:$CONTAINER_PORT
+{{- end }}
+
+2. Check the operator status:
+  kubectl --namespace {{ .Release.Namespace }} get pods -l "app.kubernetes.io/name={{ include "punching-fist.name" . }},app.kubernetes.io/instance={{ .Release.Name }}"
+
+3. View operator logs:
+  kubectl --namespace {{ .Release.Namespace }} logs -f statefulset/{{ include "punching-fist.fullname" . }}
+
+{{- if .Values.prometheus.serviceMonitor.enabled }}
+4. Prometheus metrics are exposed and will be scraped automatically.
+{{- end }}
+
+{{- if and .Values.testResources.enabled .Values.testResources.pipeline.enabled }}
+
+=== 🧪 E2E TEST ENVIRONMENT ENABLED ===
+
+Test resources have been deployed! The following components are running:
+
+✓ Test workloads in namespace "{{ .Values.testResources.namespace }}"
+  - crashloop-app (triggers crash loop alerts)
+  - memory-hog (triggers memory alerts)
+  - cpu-intensive (triggers CPU alerts)
+
+✓ Prometheus rules for test alerts
+✓ AlertManager configured to route to Punching Fist
+✓ Test pipeline (Source → Workflow → Sink)
+
+To monitor the e2e test flow:
+  # Check test status
+  kubectl get pods -n {{ .Values.testResources.namespace }}
+  kubectl get sources,workflows,sinks -n {{ .Release.Namespace }}
+  
+  # View alerts
+  kubectl port-forward -n {{ .Release.Namespace }} svc/{{ .Release.Name }}-prometheus-s-prometheus 9090:9090
+  # Visit http://localhost:9090/alerts
+  
+  # Watch investigations
+  kubectl logs -f statefulset/{{ include "punching-fist.fullname" . }} -n {{ .Release.Namespace }}
+
+Alerts will start firing automatically after a few minutes as the test pods exhibit problems.
+
+{{- end }} 

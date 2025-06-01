@@ -1,0 +1,14 @@
+# Source configuration for test webhook endpoint
+apiVersion: punchingfist.io/v1alpha1
+kind: Source
+metadata:
+  name: test-webhook
+  namespace: punching-fist
+spec:
+  type: webhook
+  config:
+    path: "/webhook/test"
+    filters: {}  # Accept all alerts for testing
+  triggerWorkflow: "test-stdout-pipeline"
+  context:
+    source: "test-alerts" 

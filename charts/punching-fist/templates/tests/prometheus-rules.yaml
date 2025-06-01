@@ -1,0 +1,66 @@
+{{- if and .Values.testResources.enabled .Values.testResources.prometheusRules.enabled }}
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ include "punching-fist.fullname" . }}-test-alerts
+  namespace: {{ .Values.testResources.namespace }}
+  labels:
+    {{- include "punching-fist.labels" . | nindent 4 }}
+    prometheus: kube-prometheus
+spec:
+  groups:
+  - name: test-workload-alerts
+    interval: 30s
+    rules:
+    # Alert for pod crash looping
+    - alert: TestPodCrashLooping
+      expr: |
+        rate(kube_pod_container_status_restarts_total{namespace="{{ .Values.testResources.namespace }}", pod=~"crashloop-.*"}[5m]) > 0.1
+      for: 2m
+      labels:
+        severity: critical
+        namespace: {{ .Values.testResources.namespace }}
+      annotations:
+        summary: "Test pod {{ "{{ $labels.pod }}" }} is crash looping"
+        description: "Pod {{ "{{ $labels.pod }}" }} in namespace {{ "{{ $labels.namespace }}" }} has restarted {{ "{{ $value }}" }} times in the last 5 minutes"
+        runbook_url: "https://github.com/kubernetes-monitoring/kubernetes-mixin/tree/master/runbook.md#alert-name-kubepodcrashlooping"
+    
+    # Alert for high memory usage
+    - alert: TestPodHighMemoryUsage
+      expr: |
+        container_memory_working_set_bytes{namespace="{{ .Values.testResources.namespace }}", pod=~"memory-hog.*"} 
+        / container_spec_memory_limit_bytes{namespace="{{ .Values.testResources.namespace }}", pod=~"memory-hog.*"} > 0.8
+      for: 2m
+      labels:
+        severity: warning
+        namespace: {{ .Values.testResources.namespace }}
+      annotations:
+        summary: "Test pod {{ "{{ $labels.pod }}" }} has high memory usage"
+        description: "Pod {{ "{{ $labels.pod }}" }} is using {{ "{{ $value | humanizePercentage }}" }} of its memory limit"
+    
+    # Alert for high CPU usage
+    - alert: TestPodHighCPUUsage
+      expr: |
+        rate(container_cpu_usage_seconds_total{namespace="{{ .Values.testResources.namespace }}", pod=~"cpu-intensive.*"}[5m])
+        / container_spec_cpu_quota{namespace="{{ .Values.testResources.namespace }}", pod=~"cpu-intensive.*"} * 100000 > 0.8
+      for: 2m
+      labels:
+        severity: warning
+        namespace: {{ .Values.testResources.namespace }}
+      annotations:
+        summary: "Test pod {{ "{{ $labels.pod }}" }} has high CPU usage"
+        description: "Pod {{ "{{ $labels.pod }}" }} is using {{ "{{ $value | humanizePercentage }}" }} of its CPU limit"
+    
+    # Alert for pod not ready
+    - alert: TestPodNotReady
+      expr: |
+        kube_pod_status_ready{namespace="{{ .Values.testResources.namespace }}", condition="false"} == 1
+      for: 5m
+      labels:
+        severity: warning
+        namespace: {{ .Values.testResources.namespace }}
+      annotations:
+        summary: "Test pod {{ "{{ $labels.pod }}" }} is not ready"
+        description: "Pod {{ "{{ $labels.pod }}" }} in namespace {{ "{{ $labels.namespace }}" }} has been not ready for 5 minutes"
+{{- end }} 

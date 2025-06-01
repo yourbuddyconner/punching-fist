@@ -69,7 +69,7 @@ spec:
   containers:
   - name: failing-app
     image: busybox
-    command: ["sh", "-c", "echo 'Starting...'; sleep 10; echo 'Crashing!'; exit 1"]
+    command: ["sh", "-c", "echo 'Starting crashloop test pod...'; sleep 300; echo 'Crashing after 5 minutes!'; exit 1"]
     resources:
       requests:
         memory: "32Mi"

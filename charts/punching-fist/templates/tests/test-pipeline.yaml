@@ -1,0 +1,75 @@
+{{- if and .Values.testResources.enabled .Values.testResources.pipeline.enabled }}
+---
+# Test-specific stdout sink with more detailed formatting for test alerts
+apiVersion: punchingfist.io/v1alpha1
+kind: Sink
+metadata:
+  name: {{ include "punching-fist.fullname" . }}-test-stdout
+  namespace: {{ .Release.Namespace }}
+spec:
+  type: stdout
+  config:
+    format: |
+      ========================================
+      🧪 TEST ALERT INVESTIGATION RESULTS 🧪
+      ========================================
+      Alert: {{ printf "{{ .source.data.alerts[0].labels.alertname }}" }}
+      Severity: {{ printf "{{ .source.data.alerts[0].labels.severity }}" }}
+      Pod: {{ printf "{{ .source.data.alerts[0].labels.pod }}" }}
+      Namespace: {{ printf "{{ .source.data.alerts[0].labels.namespace }}" }}
+      Time: {{ printf "{{ .workflow.completedAt }}" }}
+      ========================================
+      
+      INVESTIGATION SUMMARY:
+      ---------------------
+      {{ printf "{{ .workflow.outputs.alert_summary }}" }}
+      
+      
+      CURRENT STATE:
+      --------------
+      {{ printf "{{ .workflow.outputs.current_state }}" }}
+      
+      
+      ROOT CAUSE:
+      -----------
+      {{ printf "{{ .workflow.outputs.root_cause }}" }}
+      
+      
+      RECOMMENDATIONS:
+      ----------------
+      {{ printf "{{ .workflow.outputs.recommendations }}" }}
+      
+      ========================================
+      Workflow: {{ printf "{{ .workflow.name }}" }}
+      Duration: {{ printf "{{ .workflow.duration }}" }}
+      Status: {{ printf "{{ .workflow.status }}" }}
+      ========================================
+{{- if .Values.testResources.pipeline.enableSlack }}
+---
+# Sink: Slack notifications for test alerts
+apiVersion: punchingfist.io/v1alpha1
+kind: Sink
+metadata:
+  name: {{ include "punching-fist.fullname" . }}-test-slack
+  namespace: {{ .Release.Namespace }}
+spec:
+  type: slack
+  config:
+    channel: "{{ .Values.testResources.pipeline.slackChannel }}"
+    tokenSecret: "{{ .Values.testResources.pipeline.slackTokenSecret }}"
+    messageTemplate: |
+      :rotating_light: *Test Alert Investigation Complete* :rotating_light:
+      
+      *Alert:* {{ printf "{{ .source.data.alerts[0].labels.alertname }}" }}
+      *Pod:* {{ printf "{{ .source.data.alerts[0].labels.pod }}" }}
+      *Namespace:* {{ printf "{{ .source.data.alerts[0].labels.namespace }}" }}
+      *Severity:* {{ printf "{{ .source.data.alerts[0].labels.severity }}" }}
+      
+      *Summary:* {{ printf "{{ .workflow.outputs.alert_summary }}" }}
+      
+      *Root Cause:* {{ printf "{{ .workflow.outputs.root_cause }}" }}
+      
+      *Recommendations:*
+      {{ printf "{{ .workflow.outputs.recommendations }}" }}
+{{- end }}
+{{- end }} 

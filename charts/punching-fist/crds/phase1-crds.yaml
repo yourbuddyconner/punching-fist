@@ -195,80 +195,6 @@ spec:
     name: v1alpha1
     schema:
       openAPIV3Schema:
-        definitions:
-          Step:
-            properties:
-              agent:
-                allOf:
-                - $ref: '#/components/schemas/Step'
-                description: Nested agent configuration for conditional steps
-                nullable: true
-              approvalRequired:
-                default: false
-                description: Whether approval is required before execution
-                type: boolean
-              command:
-                description: Command to execute (for CLI steps)
-                nullable: true
-                type: string
-              condition:
-                description: Condition for conditional steps
-                nullable: true
-                type: string
-              goal:
-                description: Goal for agent (for agent steps)
-                nullable: true
-                type: string
-              maxIterations:
-                description: Maximum iterations for agent
-                format: int32
-                nullable: true
-                type: integer
-              name:
-                description: Step name
-                type: string
-              timeoutMinutes:
-                description: Timeout in minutes
-                format: int32
-                nullable: true
-                type: integer
-              tools:
-                default: []
-                description: Available tools for agent
-                items:
-                  anyOf:
-                  - type: string
-                  - required:
-                    - description
-                    - name
-                  properties:
-                    command:
-                      description: Custom command (optional)
-                      nullable: true
-                      type: string
-                    description:
-                      description: Tool description
-                      type: string
-                    endpoint:
-                      description: Endpoint for API tools
-                      nullable: true
-                      type: string
-                    name:
-                      description: Tool name
-                      type: string
-                  type: object
-                type: array
-              type:
-                description: 'Step type: cli, agent, conditional'
-                enum:
-                - cli
-                - agent
-                - conditional
-                type: string
-            required:
-            - name
-            - type
-            type: object
         description: Auto-generated derived type for WorkflowSpec via `CustomResource`
         properties:
           spec:
@@ -309,7 +235,8 @@ spec:
                         nullable: true
                         type: string
                       endpoint:
-                        description: Endpoint URL for the LLM
+                        description: Endpoint URL for the LLM (only needed for local/custom providers)
+                        nullable: true
                         type: string
                       model:
                         description: Model to use
@@ -318,7 +245,6 @@ spec:
                         description: LLM provider (local, claude, openai)
                         type: string
                     required:
-                    - endpoint
                     - model
                     - provider
                     type: object
@@ -336,10 +262,71 @@ spec:
                 items:
                   properties:
                     agent:
-                      allOf:
-                      - $ref: '#/components/schemas/Step'
                       description: Nested agent configuration for conditional steps
                       nullable: true
+                      properties:
+                        approvalRequired:
+                          default: false
+                          description: Whether approval is required before execution
+                          type: boolean
+                        command:
+                          description: Command to execute (for CLI steps)
+                          nullable: true
+                          type: string
+                        condition:
+                          description: Condition for conditional steps
+                          nullable: true
+                          type: string
+                        goal:
+                          description: Goal for agent (for agent steps)
+                          nullable: true
+                          type: string
+                        maxIterations:
+                          description: Maximum iterations for agent
+                          format: int32
+                          nullable: true
+                          type: integer
+                        name:
+                          description: Step name
+                          type: string
+                        timeoutMinutes:
+                          description: Timeout in minutes
+                          format: int32
+                          nullable: true
+                          type: integer
+                        tools:
+                          default: []
+                          description: Available tools for agent
+                          items:
+                            type: object
+                            properties:
+                              ref:
+                                description: Reference to a predefined tool
+                                type: string
+                              name:
+                                description: Tool name (for custom tools)
+                                type: string
+                              description:
+                                description: Tool description (for custom tools)
+                                type: string
+                              command:
+                                description: Custom command (optional)
+                                type: string
+                              endpoint:
+                                description: Endpoint for API tools
+                                type: string
+                          type: array
+                        type:
+                          description: 'Step type: cli, agent, conditional'
+                          enum:
+                          - cli
+                          - agent
+                          - conditional
+                          type: string
+                      required:
+                      - name
+                      - type
+                      type: object
                     approvalRequired:
                       default: false
                       description: Whether approval is required before execution
@@ -373,27 +360,23 @@ spec:
                       default: []
                       description: Available tools for agent
                       items:
-                        anyOf:
-                        - type: string
-                        - required:
-                          - description
-                          - name
+                        type: object
                         properties:
-                          command:
-                            description: Custom command (optional)
-                            nullable: true
+                          ref:
+                            description: Reference to a predefined tool
+                            type: string
+                          name:
+                            description: Tool name (for custom tools)
                             type: string
                           description:
-                            description: Tool description
+                            description: Tool description (for custom tools)
+                            type: string
+                          command:
+                            description: Custom command (optional)
                             type: string
                           endpoint:
                             description: Endpoint for API tools
-                            nullable: true
                             type: string
-                          name:
-                            description: Tool name
-                            type: string
-                        type: object
                       type: array
                     type:
                       description: 'Step type: cli, agent, conditional'
@@ -481,6 +464,7 @@ spec:
                     result:
                       description: Step result
                       nullable: true
+                      type: object
                     startTime:
                       description: Start time
                       nullable: true
@@ -607,9 +591,17 @@ spec:
                     description: Name of the workflow to trigger (for Workflow sink)
                     nullable: true
                     type: string
+                  format:
+                    description: Output format for stdout sink (json or text)
+                    nullable: true
+                    type: string
+                  pretty:
+                    description: Whether to pretty print JSON output for stdout sink
+                    nullable: true
+                    type: boolean
                 type: object
               type:
-                description: 'Type of sink: slack, alertmanager, prometheus, jira, pagerduty, workflow'
+                description: 'Type of sink: slack, alertmanager, prometheus, jira, pagerduty, workflow, stdout'
                 enum:
                 - slack
                 - alertmanager
@@ -617,6 +609,7 @@ spec:
                 - jira
                 - pagerduty
                 - workflow
+                - stdout
                 type: string
             required:
             - config

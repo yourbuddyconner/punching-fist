@@ -33,6 +33,7 @@ pub enum SinkType {
     Jira,
     PagerDuty,
     Workflow,
+    Stdout,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, JsonSchema)]
@@ -105,6 +106,15 @@ pub struct SinkConfig {
     /// Additional context
     #[serde(default)]
     pub context: HashMap<String, String>,
+
+    // Stdout specific config
+    /// Output format for stdout sink: "json" or "text"
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub format: Option<String>,
+
+    /// Whether to pretty print JSON output for stdout sink
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pretty: Option<bool>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, JsonSchema)]

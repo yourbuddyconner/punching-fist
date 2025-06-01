@@ -37,6 +37,9 @@ prometheus:
   serviceMonitor:
     enabled: true  # Enable ServiceMonitor since we have prometheus-operator
     interval: 15s
+  # AlertManager webhook configuration
+  alertmanager:
+    enabled: true  # Enable generic AlertManager webhook source
 
 # Security configuration
 security:
@@ -75,39 +78,93 @@ containerSecurityContext:
 testResources:
   enabled: true  # Deploy test workloads automatically
   namespace: test-workloads
+  
+  # Prometheus rules for test alerts
+  prometheusRules:
+    enabled: true  # Create PrometheusRules for test workloads
+  
+  # Test pipeline configuration (Source, Workflow, Sink)
+  pipeline:
+    enabled: true  # Deploy test pipeline CRDs
+    maxIterations: 10
+    timeoutMinutes: 5
+    
+    # Slack configuration (disabled for local testing)
+    enableSlack: false
+    slackChannel: "#test-alerts"
+    slackTokenSecret: "slack-bot-token"
 
 # Prometheus Stack configuration - enabled for local development
 prometheus-stack:
   enabled: true
   prometheus:
     prometheusSpec:
-      # Smaller resources for local development
-      resources:
-        requests:
-          memory: 200Mi
-          cpu: 50m
-        limits:
-          memory: 400Mi
-          cpu: 200m
-      # Smaller storage for local
+      # Increased storage for local development
       storageSpec:
         volumeClaimTemplate:
           spec:
             accessModes: ["ReadWriteOnce"]
             resources:
               requests:
-                storage: 500Mi
+                storage: 2Gi  # Increased from 500Mi
       # Shorter retention for local
       retention: 1d
+      # Memory optimization settings
+      walCompression: true  # Enable WAL compression
+      # Scrape optimization
+      scrapeInterval: 30s  # Increased from default 15s
+      evaluationInterval: 30s
       # Select all service monitors
       serviceMonitorSelector: {}
+      # Rule selector - pick up all PrometheusRules
+      ruleSelector: {}
       # NodePort for easy access from host
       service:
         type: NodePort
         nodePort: 30090
-  # Minimal components for local testing
+  
+  # Enable AlertManager for e2e testing
   alertmanager:
-    enabled: false
+    enabled: true
+    config:
+      global:
+        resolve_timeout: 5m
+      route:
+        group_by: ['alertname', 'namespace', 'pod']
+        group_wait: 10s
+        group_interval: 10s
+        repeat_interval: 1h
+        receiver: 'punching-fist-generic'  # Use generic receiver as default
+      receivers:
+      - name: 'punching-fist-generic'
+        webhook_configs:
+        - url: 'http://punching-fist:8080/webhook/alertmanager'
+          send_resolved: true
+          max_alerts: 100
+      - name: 'null'  # Keep null receiver for silencing if needed
+      # Silence non-important alerts to reduce noise
+      inhibit_rules:
+      - source_match:
+          severity: 'critical'
+        target_match:
+          severity: 'warning'
+        equal: ['alertname', 'namespace', 'pod']
+    alertmanagerSpec:
+      # Increased log level for debugging
+      logLevel: info
+      # Storage for silences
+      storage:
+        volumeClaimTemplate:
+          spec:
+            accessModes: ["ReadWriteOnce"]
+            resources:
+              requests:
+                storage: 100Mi
+    service:
+      type: NodePort
+      nodePort: 30093
+  
+  # Minimal components for local testing
   grafana:
     enabled: false
   kubeStateMetrics:
@@ -119,10 +176,11 @@ prometheus-stack:
 
 # Agent configuration
 agent:
-  # Default to mock provider for local testing without API keys
-  provider: "mock"  
-  anthropicApiKey: ""  # Set via --set agent.anthropicApiKey=your_key or use deploy-local-with-key command
-  openaiApiKey: ""     # Set via --set agent.openaiApiKey=your_key
+  # Default to anthropic provider for local testing.
+  # ANTHROPIC_API_KEY should be provided via .env file and set by Justfile during test deployment.
+  provider: "anthropic"
+  anthropicApiKey: ""  # This will be overridden by --set in the Justfile's test-deploy-operator
+  openaiApiKey: ""     # Not used by default for local testing with anthropic
 
 # Use NodePort for easier local access
 service:

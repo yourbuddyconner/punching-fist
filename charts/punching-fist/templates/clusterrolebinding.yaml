@@ -1,0 +1,19 @@
+{{- if .Values.security.rbac.create -}}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ .Release.Name }}-crd-access
+  labels:
+    app.kubernetes.io/name: {{ .Chart.Name }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/version: {{ .Chart.AppVersion | quote }}
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ .Release.Name }}-crd-access
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "punching-fist.serviceAccountName" . }}
+    namespace: {{ .Release.Namespace }}
+{{- end }} 
