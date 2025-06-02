@@ -1,0 +1,10 @@
+{{- if .Values.testResources.enabled }}
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: {{ .Values.testResources.namespace }}
+  labels:
+    {{- include "punching-fist.labels" . | nindent 4 }}
+    test-resources: "true"
+{{- end }} 

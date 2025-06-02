@@ -1,152 +1,188 @@
-# 👊🤖
+# Punching Fist Operator
 
-A Kubernetes operator designed to run in your cluster and perform one-off or automated maintenance tasks. Built with Rust and Axum, Punching Fist provides a robust solution for cluster maintenance and automation.
+A Kubernetes operator that provides intelligent incident response using LLM-powered investigation and automated remediation.
 
-## Overview
+## 🚀 Quick Start
 
-Punching Fist Operator (👊🤖) is a Kubernetes operator that leverages AI-powered automation to handle cluster maintenance tasks. It integrates with your existing monitoring stack and can respond to alerts or perform scheduled maintenance operations.
+Punching Fist transforms alerts into autonomous investigations:
 
-### Key Features
+```mermaid
+graph LR
+    A[Alert] --> B[Workflow] --> C[LLM Investigation] --> D[Auto-Remediation]
+```
 
-- 🤖 AI-powered maintenance using OpenHands in headless mode
-- 🔄 Real-time alert response via webhook integration
-- 📊 Prometheus metrics integration
-- 🔧 Kubernetes-native operations
-- 🛡️ Secure service account-based authentication
-- 🚀 High-performance Rust implementation
+### Prerequisites
+- Kubernetes cluster (1.21+)
+- kubectl configured
+- LLM API access (Anthropic Claude or OpenAI)
 
-## Architecture
-
-The operator consists of several key components:
-
-1. **Webhook Server**: Built with Axum, handles HTTP webhook requests from alerting systems
-2. **OpenHands Integration**: Processes maintenance tasks using AI
-3. **Kubernetes Client**: Manages cluster operations
-4. **Prometheus Integration**: Collects and analyzes metrics
-
-## Prerequisites
-
-- Kubernetes cluster (v1.20+)
-- Prometheus AlertManager
-- OpenHands API access
-- kubectl installed in the operator container
-
-## Installation
+### Installation
 
 ```bash
-# Add the Helm repository
-helm repo add punching-fist https://your-helm-repo-url
-
-# Install the operator
-helm install punching-fist punching-fist/punching-fist \
+# Deploy with Helm
+helm install punching-fist ./charts/punching-fist \
   --namespace punching-fist \
   --create-namespace \
-  --set openhands.apiKey=your-api-key
+  --set agent.anthropicApiKey=your-api-key
 ```
 
-## Configuration
-
-The operator is configured entirely through environment variables. For development, create a `.env` file in the project root (copy from `env.example`):
-
-```bash
-# Copy the example file
-cp env.example .env
-
-# Edit the values
-vim .env
-```
-
-### Environment Variables
-
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `SERVER_ADDR` | Server bind address | `0.0.0.0:8080` |
-| `KUBE_NAMESPACE` | Kubernetes namespace | `default` |
-| `KUBE_SERVICE_ACCOUNT` | Service account name | `punching-fist` |
-| `LLM_API_KEY` | LLM API key for OpenHands | (required) |
-| `LLM_MODEL` | Default LLM model for OpenHands | `anthropic/claude-3-5-sonnet-20241022` |
-| `EXECUTION_MODE` | Execution mode (`local` or `kubernetes`) | `local` |
-| `DATABASE_TYPE` | Database type (`sqlite` or `postgres`) | `sqlite` |
-| `SQLITE_PATH` | SQLite database path | `data/punching-fist.db` |
-| `DATABASE_URL` | PostgreSQL connection URL | (required for postgres) |
-| `DATABASE_MAX_CONNECTIONS` | Max database connections | `5` |
-| `RUST_LOG` | Logging level | `info` |
-
-**Note:** `LLM_API_KEY` is required for OpenHands AI functionality to work. This should be your LLM provider's API key (e.g., OpenAI, Anthropic, etc.).
-
-### Kubernetes ConfigMap and Secrets
-
-For production deployments, use ConfigMaps and Secrets:
+### Your First Investigation
 
 ```yaml
-apiVersion: v1
-kind: ConfigMap
+apiVersion: punching-fist.io/v1alpha1
+kind: Workflow
 metadata:
-  name: punching-fist-config
-data:
-  openhands.apiKey: "your-api-key"
-  server.port: "8080"
-  prometheus.enabled: "true"
-```
-
-## Usage
-
-### Alert Integration
-
-Configure Prometheus AlertManager to send alerts to the operator:
-
-```yaml
-receivers:
-- name: 'punching-fist'
-  webhook_configs:
-  - url: 'http://punching-fist:8080/webhook/alerts'
-```
-
-### Custom Maintenance Tasks
-
-Create a maintenance task:
-
-```yaml
-apiVersion: maintenance.punchingfist.io/v1
-kind: MaintenanceTask
-metadata:
-  name: cleanup-old-pods
+  name: pod-crash-investigation
 spec:
-  schedule: "0 0 * * *"
-  action: "cleanup"
-  parameters:
-    age: "7d"
+  trigger:
+    source: alertmanager
+    filters:
+      alertname: PodCrashLooping
+  steps:
+    - name: investigate
+      type: agent
+      goal: "Investigate why pod {{ .alert.labels.pod }} is crash looping"
+      tools: ["kubectl", "promql"]
+    - name: notify
+      type: sink
+      config:
+        sink: slack
+        message: "Investigation complete: {{ .steps.investigate.output.summary }}"
 ```
 
-## Development
+## 📚 Documentation
 
-### Building from Source
+For comprehensive documentation, see the [`docs/`](./docs/) folder:
+
+- **[📖 Architecture Overview](./docs/README.md)** - System design and data flow
+- **[🤖 Agent System](./docs/modules/agent.md)** - LLM-powered investigation runtime
+- **[⚙️ Workflow Engine](./docs/modules/workflows.md)** - Multi-step orchestration
+- **[🔗 Sources & Sinks](./docs/modules/sources.md)** - Alert ingestion and result output
+- **[🎛️ Controllers](./docs/modules/controllers.md)** - Kubernetes resource management
+
+### Quick Links
+
+| Topic | Link |
+|-------|------|
+| **Getting Started** | [Installation Guide](./docs/guides/installation.md) |
+| **First Workflow** | [Tutorial](./docs/guides/first-workflow.md) |
+| **Configuration** | [Environment Variables](./docs/reference/environment.md) |
+| **API Reference** | [HTTP API](./docs/reference/api.md) |
+| **Examples** | [Workflow Examples](./docs/examples/workflows/) |
+
+## 🔧 Key Features
+
+### 🧠 Intelligent Investigation
+- **LLM-Powered Analysis** - Autonomous root cause investigation using Claude/GPT
+- **Multi-Tool Integration** - kubectl, PromQL, curl, and custom scripts
+- **Safety-First Design** - Human approval for high-risk actions
+
+### ⚡ Workflow Orchestration
+- **Multi-Step Workflows** - Chain investigations and remediation actions
+- **Template System** - Dynamic parameter substitution with Tera templates
+- **Conditional Logic** - Branch execution based on findings
+
+### 🔒 Enterprise Ready
+- **RBAC Integration** - Kubernetes-native security model
+- **Audit Logging** - Complete action history and compliance
+- **Multi-Tenancy** - Namespace isolation and resource limits
+
+## 🏗️ Architecture
+
+```mermaid
+graph TD
+    subgraph "Alert Sources"
+        A1[AlertManager]
+        A2[Prometheus]
+        A3[Custom Webhooks]
+    end
+    
+    subgraph "Punching Fist Operator"
+        B1[Sources] --> B2[Workflows]
+        B2 --> B3[Agent Runtime]
+        B3 --> B4[LLM Providers]
+        B3 --> B5[Tool System]
+        B2 --> B6[Sinks]
+    end
+    
+    subgraph "Tools & Integrations"
+        C1[kubectl]
+        C2[PromQL]
+        C3[curl]
+        C4[Custom Scripts]
+    end
+    
+    subgraph "Output Destinations"
+        D1[Slack]
+        D2[PagerDuty]
+        D3[Webhooks]
+        D4[Email]
+    end
+    
+    A1 --> B1
+    A2 --> B1
+    A3 --> B1
+    
+    B5 --> C1
+    B5 --> C2
+    B5 --> C3
+    B5 --> C4
+    
+    B6 --> D1
+    B6 --> D2
+    B6 --> D3
+    B6 --> D4
+```
+
+## 🛠️ Development
 
 ```bash
-# Clone the repository
+# Clone and setup
 git clone https://github.com/your-org/punching-fist-operator
+cd punching-fist-operator
 
-# Build the operator
-cargo build --release
+# Install dependencies
+just install
 
-# Build the container
-docker build -t punching-fist:latest .
+# Run locally
+just run
+
+# Run tests
+just test
 ```
 
-### Running Tests
+See [Development Guide](./docs/development/setup.md) for detailed setup instructions.
 
-```bash
-cargo test
-```
+## 📊 Example Use Cases
 
-## Contributing
+### Pod Crash Investigation
+Automatically investigate pod failures, analyze logs, check resource limits, and suggest fixes.
 
-We welcome contributions! Please see our [Contributing Guide](CONTRIBUTING.md) for details.
+### Performance Degradation
+Monitor application metrics, correlate with infrastructure changes, and recommend optimizations.
 
-## License
+### Service Discovery Issues
+Diagnose networking problems, DNS resolution failures, and service mesh configuration.
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+### Resource Optimization
+Analyze resource usage patterns and recommend right-sizing for cost optimization.
 
-## Support
+## 🤝 Contributing
 
-For support, please open an issue in the GitHub repository or contact the maintainers. 
+We welcome contributions! Please see our [Contributing Guide](./docs/development/contributing.md) for details.
+
+1. Fork the repository
+2. Create a feature branch
+3. Make your changes
+4. Add tests and documentation
+5. Submit a pull request
+
+## 📄 License
+
+Apache License 2.0 - see [LICENSE](LICENSE) for details.
+
+---
+
+**Ready to get started?** Check out the [Installation Guide](./docs/guides/installation.md) or explore [Example Workflows](./docs/examples/workflows/).
+
+For questions and support, join our [community discussions](https://github.com/your-org/punching-fist-operator/discussions). 

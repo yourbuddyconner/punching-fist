@@ -1,8 +1,8 @@
 # Global settings
 global:
   image:
-    repository: punching-fist
-    tag: latest
+    repository: ttl.sh/punching-fist-operator
+    tag: "2h"
     pullPolicy: IfNotPresent
 
 # Operator configuration
@@ -20,12 +20,22 @@ operator:
 server:
   port: 8080
   host: "0.0.0.0"
+  # Optional: Override the static file path (defaults to /usr/local/share/punching-fist/static in container)
+  # staticFilePath: /custom/path/to/static
 
-# OpenHands configuration
-openhands:
-  enabled: true
-  apiKey: ""  # Set via --set or secret
-  model: "anthropic/claude-3-7-sonnet-20250219"
+# Agent configuration
+agent:
+  # Provider to use: anthropic, openai, or mock
+  provider: "anthropic"
+  # API key for the provider - set via --set or use existing secret
+  anthropicApiKey: ""
+  openaiApiKey: ""
+  # Model to use - using latest Sonnet model which maps to claude-3-5-sonnet-latest
+  model: "claude-3-5-sonnet-latest"
+  # Temperature for LLM responses
+  temperature: 0.7
+  # Max tokens for responses
+  maxTokens: 4096
 
 # Persistence configuration for SQLite database
 persistence:
@@ -40,6 +50,9 @@ prometheus:
   serviceMonitor:
     enabled: true
     interval: 15s
+  # AlertManager webhook configuration
+  alertmanager:
+    enabled: false  # Enable to create generic AlertManager webhook source
 
 # Security configuration
 security:
@@ -69,4 +82,108 @@ containerSecurityContext:
   runAsNonRoot: true
   capabilities:
     drop:
-      - ALL 
+      - ALL
+
+# Test resources configuration
+testResources:
+  enabled: false  # Enable to deploy test workloads
+  namespace: test-workloads  # Namespace for test resources
+  
+  # Prometheus rules for test alerts
+  prometheusRules:
+    enabled: false  # Enable to create PrometheusRules for test workloads
+  
+  # Test pipeline configuration (Source, Workflow, Sink)
+  pipeline:
+    enabled: false  # Enable to deploy test pipeline CRDs
+    maxIterations: 10  # Max iterations for agent workflow
+    timeoutMinutes: 5  # Timeout for agent workflow
+    
+    # Slack configuration (optional)
+    enableSlack: false  # Enable Slack notifications for test alerts
+    slackChannel: "#test-alerts"  # Slack channel for notifications
+    slackTokenSecret: "slack-bot-token"  # Name of secret containing Slack token
+
+# Prometheus Stack (subchart) configuration
+prometheus-stack:
+  enabled: false  # Enable to deploy Prometheus stack
+  prometheus:
+    prometheusSpec:
+      # Resource limits - increased for stability
+      resources:
+        requests:
+          memory: 2Gi
+          cpu: 250m
+        limits:
+          memory: 4Gi
+          cpu: 1000m
+      # Storage configuration
+      storageSpec:
+        volumeClaimTemplate:
+          spec:
+            accessModes: ["ReadWriteOnce"]
+            resources:
+              requests:
+                storage: 10Gi  # Increased storage for 7d retention
+      # Retention
+      retention: 7d
+      retentionSize: "8GB"  # Limit retention by size to prevent OOM
+      # Memory optimization settings
+      walCompression: true  # Enable WAL compression to reduce memory usage
+      # Service monitor selector - will pick up our operator's service monitor
+      serviceMonitorSelector: {}
+      # Scrape interval and timeout
+      scrapeInterval: 30s  # Increased from default 15s to reduce memory pressure
+      scrapeTimeout: 10s
+      # Additional memory optimization
+      enableFeatures:
+        - memory-snapshot-on-shutdown  # Faster restarts
+      # Additional scrape configs for test workloads
+      additionalScrapeConfigs:
+        - job_name: 'test-pods'
+          kubernetes_sd_configs:
+            - role: pod
+              namespaces:
+                names:
+                  - test-workloads
+          relabel_configs:
+            - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_scrape]
+              action: keep
+              regex: true
+            - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_path]
+              action: replace
+              target_label: __metrics_path__
+              regex: (.+)
+            - source_labels: [__address__, __meta_kubernetes_pod_annotation_prometheus_io_port]
+              action: replace
+              regex: ([^:]+)(?::\d+)?;(\d+)
+              replacement: $1:$2
+              target_label: __address__
+          # Add sample limit per scrape to prevent cardinality explosion
+          sample_limit: 10000
+    # Service configuration
+    service:
+      type: ClusterIP
+      port: 9090
+  # Disable components we don't need for testing
+  grafana:
+    enabled: false
+  kubeStateMetrics:
+    enabled: true
+  nodeExporter:
+    enabled: false
+  pushgateway:
+    enabled: false
+  alertmanager:
+    enabled: false
+
+# Execution mode configuration
+executionMode: kubernetes
+
+# Database configuration
+database:
+  type: sqlite
+  sqlitePath: "/data/punching-fist.db"
+  # For PostgreSQL:
+  # type: postgres
+  # url: "postgres://user:password@localhost/punching_fist" 

@@ -39,10 +39,18 @@ RUN apt-get update && \
 # Copy the binary from builder
 COPY --from=builder /tmp/punching-fist-operator .
 
+# Copy static files for the UI
+RUN mkdir -p /usr/local/share/punching-fist/static
+COPY --from=builder /usr/src/punching-fist-operator/crates/operator/static /usr/local/share/punching-fist/static
+
 # Create non-root user and add to docker group
 RUN groupadd -g 999 docker && \
-    useradd -m -u 1000 -G docker appuser
+    useradd -m -u 1000 -G docker appuser && \
+    chown -R appuser:appuser /usr/local/share/punching-fist
 USER appuser
+
+# Set environment variables
+ENV STATIC_FILE_PATH=/usr/local/share/punching-fist/static
 
 # Expose the WebSocket port
 EXPOSE 8080

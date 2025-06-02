@@ -7,6 +7,38 @@ description.workspace = true
 
 [lib]
 
+[[bin]]
+name = "generate-crds"
+path = "src/bin/generate_crds.rs"
+
+[[bin]]
+name = "test-agent"
+path = "src/bin/test_agent.rs"
+
+[[example]]
+name = "test_agent"
+path = "examples/test_agent.rs"
+
+[[example]]
+name = "test_workflow_agent"
+path = "examples/test_workflow_agent.rs"
+
+[[example]]
+name = "test_anthropic"
+path = "examples/test_anthropic.rs"
+
+[[example]]
+name = "test_openai"
+path = "examples/test_openai.rs"
+
+[[example]]
+name = "test_rig_tools"
+path = "examples/test_rig_tools.rs"
+
+[features]
+default = ["server"]
+server = []
+
 [dependencies]
 # Web framework
 axum.workspace = true
@@ -21,6 +53,8 @@ k8s-openapi.workspace = true
 # Serialization
 serde.workspace = true
 serde_json.workspace = true
+schemars.workspace = true
+serde_yaml = "0.9"
 
 # Logging and tracing
 tracing.workspace = true
@@ -35,6 +69,7 @@ reqwest.workspace = true
 
 # Metrics
 prometheus.workspace = true
+lazy_static.workspace = true
 
 # Time handling
 chrono.workspace = true
@@ -51,6 +86,25 @@ async-trait.workspace = true
 # UUID
 uuid.workspace = true
 
+# URL parsing
+url = "2.5"
+
+# Hashing
+sha2 = "0.10"
+
+# Regex
+regex = "1.10"
+
+# Template engine
+tera = "1.20"
+
+# LLM Integration
+rig-core = "0.12"
+
+# CLI parsing
+clap = { version = "4", features = ["derive"] }
+
 [dev-dependencies]
 tokio-test.workspace = true
-mockall.workspace = true 
+mockall.workspace = true
+axum-test = "17.3.0"

@@ -1,31 +1,35 @@
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
-use sqlx::{
-    postgres::{PgConnectOptions, PgPool},
-    Row,
-};
-use std::str::FromStr;
+use sqlx::{postgres::PgPool, Pool, Postgres};
+use tracing::{error, info};
 use uuid::Uuid;
+use std::collections::HashMap;
+use serde_json::Value as JsonValue;
 
-use super::{
-    AlertRecord, DatabaseConfig, Store, TaskRecord, TaskResources, TaskStatus,
+use crate::{
+    store::{
+        Alert, AlertStatus, CustomResource, DeduplicationResult, 
+        SinkOutput, SinkStatus, SourceEvent, StepStatus, 
+        Store, Workflow, WorkflowStatus, WorkflowStep,
+    },
+    Error, Result,
 };
-use crate::Result;
-use crate::OperatorError;
 
 pub struct PostgresStore {
-    pool: PgPool,
+    pool: Pool<Postgres>,
 }
 
 impl PostgresStore {
-    pub async fn new(config: &DatabaseConfig) -> Result<Self> {
-        let options = PgConnectOptions::from_str(
-            config.postgres_url
-                .as_ref()
-                .ok_or_else(|| OperatorError::Config("PostgreSQL URL not configured".into()))?
-        )?;
-
-        let pool = PgPool::connect_with(options).await?;
+    pub async fn new(connection_string: &str) -> Result<Self> {
+        info!("Connecting to PostgreSQL database");
+        
+        let pool = PgPool::connect(connection_string)
+            .await
+            .map_err(|e| {
+                error!("Failed to connect to PostgreSQL: {}", e);
+                Error::Sqlx(e)
+            })?;
+        
         Ok(Self { pool })
     }
 }
@@ -33,248 +37,151 @@ impl PostgresStore {
 #[async_trait]
 impl Store for PostgresStore {
     async fn init(&self) -> Result<()> {
+        info!("Running database migrations");
+        
         sqlx::migrate!("./migrations")
             .run(&self.pool)
-            .await?;
+            .await
+            .map_err(|e| {
+                error!("Failed to run migrations: {}", e);
+                Error::Migrate(e)
+            })?;
+        
         Ok(())
     }
-
-    async fn save_alert(&self, alert: AlertRecord) -> Result<()> {
-        sqlx::query(
-            r#"
-            INSERT INTO alerts (
-                id, name, status, severity, description, labels, annotations,
-                starts_at, ends_at, created_at, updated_at
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-            "#,
-        )
-        .bind(alert.id)
-        .bind(&alert.name)
-        .bind(&alert.status)
-        .bind(&alert.severity)
-        .bind(&alert.description)
-        .bind(serde_json::to_string(&alert.labels)?)
-        .bind(serde_json::to_string(&alert.annotations)?)
-        .bind(alert.starts_at)
-        .bind(alert.ends_at)
-        .bind(alert.created_at)
-        .bind(alert.updated_at)
-        .execute(&self.pool)
-        .await?;
-
-        Ok(())
+    
+    // TODO: Implement all the Phase 1 store methods for PostgreSQL
+    // For now, using placeholder implementations
+    
+    async fn save_alert(&self, _alert: Alert) -> Result<()> {
+        todo!("Implement save_alert for PostgreSQL")
     }
-
-    async fn get_alert(&self, id: Uuid) -> Result<Option<AlertRecord>> {
-        let row = sqlx::query(
-            r#"
-            SELECT * FROM alerts WHERE id = $1
-            "#,
-        )
-        .bind(id)
-        .fetch_optional(&self.pool)
-        .await?;
-
-        if let Some(row) = row {
-            Ok(Some(AlertRecord {
-                id: row.get("id"),
-                name: row.get("name"),
-                status: row.get("status"),
-                severity: row.get("severity"),
-                description: row.get("description"),
-                labels: serde_json::from_str(row.get("labels"))?,
-                annotations: serde_json::from_str(row.get("annotations"))?,
-                starts_at: row.get("starts_at"),
-                ends_at: row.get("ends_at"),
-                created_at: row.get("created_at"),
-                updated_at: row.get("updated_at"),
-            }))
-        } else {
-            Ok(None)
-        }
+    
+    async fn get_alert(&self, _id: Uuid) -> Result<Option<Alert>> {
+        todo!("Implement get_alert for PostgreSQL")
     }
-
-    async fn save_task(&self, task: TaskRecord) -> Result<()> {
-        sqlx::query(
-            r#"
-            INSERT INTO tasks (
-                id, alert_id, prompt, model, status, max_retries, retry_count,
-                timeout, resources, created_at, updated_at, started_at,
-                completed_at, error
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
-            "#,
-        )
-        .bind(task.id)
-        .bind(task.alert_id)
-        .bind(&task.prompt)
-        .bind(&task.model)
-        .bind(task.status as i32)
-        .bind(task.max_retries)
-        .bind(task.retry_count)
-        .bind(task.timeout)
-        .bind(serde_json::to_string(&task.resources)?)
-        .bind(task.created_at)
-        .bind(task.updated_at)
-        .bind(task.started_at)
-        .bind(task.completed_at)
-        .bind(&task.error)
-        .execute(&self.pool)
-        .await?;
-
-        Ok(())
+    
+    async fn get_alert_by_fingerprint(&self, _fingerprint: &str) -> Result<Option<Alert>> {
+        todo!("Implement get_alert_by_fingerprint for PostgreSQL")
     }
-
-    async fn get_task(&self, id: Uuid) -> Result<Option<TaskRecord>> {
-        let row = sqlx::query(
-            r#"
-            SELECT * FROM tasks WHERE id = $1
-            "#,
-        )
-        .bind(id)
-        .fetch_optional(&self.pool)
-        .await?;
-
-        if let Some(row) = row {
-            Ok(Some(TaskRecord {
-                id: row.get("id"),
-                alert_id: row.get("alert_id"),
-                prompt: row.get("prompt"),
-                model: row.get("model"),
-                status: match row.get::<i32, _>("status") {
-                    0 => TaskStatus::Pending,
-                    1 => TaskStatus::Running,
-                    2 => TaskStatus::Succeeded,
-                    3 => TaskStatus::Failed,
-                    4 => TaskStatus::Retrying,
-                    _ => return Err(OperatorError::Config("Invalid task status".into())),
-                },
-                max_retries: row.get("max_retries"),
-                retry_count: row.get("retry_count"),
-                timeout: row.get("timeout"),
-                resources: serde_json::from_str(row.get("resources"))?,
-                created_at: row.get("created_at"),
-                updated_at: row.get("updated_at"),
-                started_at: row.get("started_at"),
-                completed_at: row.get("completed_at"),
-                error: row.get("error"),
-            }))
-        } else {
-            Ok(None)
-        }
+    
+    async fn update_alert_status(&self, _id: Uuid, _status: AlertStatus) -> Result<()> {
+        todo!("Implement update_alert_status for PostgreSQL")
     }
-
-    async fn update_task_status(&self, id: Uuid, status: TaskStatus) -> Result<()> {
-        let now = Utc::now();
-        sqlx::query(
-            r#"
-            UPDATE tasks
-            SET status = $1, updated_at = $2
-            WHERE id = $3
-            "#,
-        )
-        .bind(status as i32)
-        .bind(now)
-        .bind(id)
-        .execute(&self.pool)
-        .await?;
-
-        Ok(())
+    
+    async fn update_alert_ai_analysis(&self, _id: Uuid, _analysis: JsonValue, _confidence: f32) -> Result<()> {
+        todo!("Implement update_alert_ai_analysis for PostgreSQL")
     }
-
-    async fn update_task_completion(&self, id: Uuid, status: TaskStatus, started_at: Option<DateTime<Utc>>, completed_at: Option<DateTime<Utc>>, error: Option<String>) -> Result<()> {
-        let now = Utc::now();
-        sqlx::query(
-            r#"
-            UPDATE tasks
-            SET status = $1, updated_at = $2, started_at = $3, completed_at = $4, error = $5
-            WHERE id = $6
-            "#,
-        )
-        .bind(status as i32)
-        .bind(now)
-        .bind(started_at)
-        .bind(completed_at)
-        .bind(error)
-        .bind(id)
-        .execute(&self.pool)
-        .await?;
-
-        Ok(())
+    
+    async fn update_alert_timing(&self, _id: Uuid, _field: &str, _timestamp: DateTime<Utc>) -> Result<()> {
+        todo!("Implement update_alert_timing for PostgreSQL")
     }
-
-    async fn list_tasks(&self, limit: i64, offset: i64) -> Result<Vec<TaskRecord>> {
-        let rows = sqlx::query(
-            r#"
-            SELECT * FROM tasks
-            ORDER BY created_at DESC
-            LIMIT $1 OFFSET $2
-            "#,
-        )
-        .bind(limit)
-        .bind(offset)
-        .fetch_all(&self.pool)
-        .await?;
-
-        let mut tasks = Vec::with_capacity(rows.len());
-        for row in rows {
-            tasks.push(TaskRecord {
-                id: row.get("id"),
-                alert_id: row.get("alert_id"),
-                prompt: row.get("prompt"),
-                model: row.get("model"),
-                status: match row.get::<i32, _>("status") {
-                    0 => TaskStatus::Pending,
-                    1 => TaskStatus::Running,
-                    2 => TaskStatus::Succeeded,
-                    3 => TaskStatus::Failed,
-                    4 => TaskStatus::Retrying,
-                    _ => return Err(OperatorError::Config("Invalid task status".into())),
-                },
-                max_retries: row.get("max_retries"),
-                retry_count: row.get("retry_count"),
-                timeout: row.get("timeout"),
-                resources: serde_json::from_str(row.get("resources"))?,
-                created_at: row.get("created_at"),
-                updated_at: row.get("updated_at"),
-                started_at: row.get("started_at"),
-                completed_at: row.get("completed_at"),
-                error: row.get("error"),
-            });
-        }
-
-        Ok(tasks)
+    
+    async fn list_alerts(&self, _limit: i64, _offset: i64) -> Result<Vec<Alert>> {
+        todo!("Implement list_alerts for PostgreSQL")
     }
-
-    async fn list_alerts(&self, limit: i64, offset: i64) -> Result<Vec<AlertRecord>> {
-        let rows = sqlx::query(
-            r#"
-            SELECT * FROM alerts
-            ORDER BY created_at DESC
-            LIMIT $1 OFFSET $2
-            "#,
-        )
-        .bind(limit)
-        .bind(offset)
-        .fetch_all(&self.pool)
-        .await?;
-
-        let mut alerts = Vec::with_capacity(rows.len());
-        for row in rows {
-            alerts.push(AlertRecord {
-                id: row.get("id"),
-                name: row.get("name"),
-                status: row.get("status"),
-                severity: row.get("severity"),
-                description: row.get("description"),
-                labels: serde_json::from_str(row.get("labels"))?,
-                annotations: serde_json::from_str(row.get("annotations"))?,
-                starts_at: row.get("starts_at"),
-                ends_at: row.get("ends_at"),
-                created_at: row.get("created_at"),
-                updated_at: row.get("updated_at"),
-            });
-        }
-
-        Ok(alerts)
+    
+    async fn list_alerts_by_status(&self, _status: AlertStatus, _limit: i64) -> Result<Vec<Alert>> {
+        todo!("Implement list_alerts_by_status for PostgreSQL")
+    }
+    
+    async fn deduplicate_alert(&self, _fingerprint: &str, _alert: Alert) -> Result<DeduplicationResult> {
+        todo!("Implement deduplicate_alert for PostgreSQL")
+    }
+    
+    async fn save_workflow(&self, _workflow: Workflow) -> Result<()> {
+        todo!("Implement save_workflow for PostgreSQL")
+    }
+    
+    async fn get_workflow(&self, _id: Uuid) -> Result<Option<Workflow>> {
+        todo!("Implement get_workflow for PostgreSQL")
+    }
+    
+    async fn update_workflow_status(&self, _id: Uuid, _status: WorkflowStatus) -> Result<()> {
+        todo!("Implement update_workflow_status for PostgreSQL")
+    }
+    
+    async fn update_workflow_progress(&self, _id: Uuid, _steps_completed: i32, _current_step: Option<String>) -> Result<()> {
+        todo!("Implement update_workflow_progress for PostgreSQL")
+    }
+    
+    async fn update_workflow_outputs(&self, _id: Uuid, _outputs: JsonValue) -> Result<()> {
+        todo!("Implement update_workflow_outputs for PostgreSQL")
+    }
+    
+    async fn complete_workflow(&self, _id: Uuid, _status: WorkflowStatus, _outputs: Option<JsonValue>, _error: Option<String>) -> Result<()> {
+        todo!("Implement complete_workflow for PostgreSQL")
+    }
+    
+    async fn list_workflows(&self, _limit: i64, _offset: i64) -> Result<Vec<Workflow>> {
+        todo!("Implement list_workflows for PostgreSQL")
+    }
+    
+    async fn save_source_event(&self, _event: SourceEvent) -> Result<()> {
+        todo!("Implement save_source_event for PostgreSQL")
+    }
+    
+    async fn get_source_event(&self, _id: Uuid) -> Result<Option<SourceEvent>> {
+        todo!("Implement get_source_event for PostgreSQL")
+    }
+    
+    async fn list_source_events(&self, _source_name: &str, _limit: i64) -> Result<Vec<SourceEvent>> {
+        todo!("Implement list_source_events for PostgreSQL")
+    }
+    
+    async fn save_workflow_step(&self, _step: WorkflowStep) -> Result<()> {
+        todo!("Implement save_workflow_step for PostgreSQL")
+    }
+    
+    async fn get_workflow_step(&self, _id: Uuid) -> Result<Option<WorkflowStep>> {
+        todo!("Implement get_workflow_step for PostgreSQL")
+    }
+    
+    async fn update_workflow_step_status(&self, _id: Uuid, _status: StepStatus) -> Result<()> {
+        todo!("Implement update_workflow_step_status for PostgreSQL")
+    }
+    
+    async fn complete_workflow_step(&self, _id: Uuid, _status: StepStatus, _result: Option<JsonValue>, _error: Option<String>) -> Result<()> {
+        todo!("Implement complete_workflow_step for PostgreSQL")
+    }
+    
+    async fn list_workflow_steps(&self, _workflow_id: Uuid) -> Result<Vec<WorkflowStep>> {
+        todo!("Implement list_workflow_steps for PostgreSQL")
+    }
+    
+    async fn save_sink_output(&self, _output: SinkOutput) -> Result<()> {
+        todo!("Implement save_sink_output for PostgreSQL")
+    }
+    
+    async fn get_sink_output(&self, _id: Uuid) -> Result<Option<SinkOutput>> {
+        todo!("Implement get_sink_output for PostgreSQL")
+    }
+    
+    async fn update_sink_output_status(&self, _id: Uuid, _status: SinkStatus, _error: Option<String>) -> Result<()> {
+        todo!("Implement update_sink_output_status for PostgreSQL")
+    }
+    
+    async fn list_sink_outputs(&self, _workflow_id: Uuid) -> Result<Vec<SinkOutput>> {
+        todo!("Implement list_sink_outputs for PostgreSQL")
+    }
+    
+    async fn save_custom_resource(&self, _resource: CustomResource) -> Result<()> {
+        todo!("Implement save_custom_resource for PostgreSQL")
+    }
+    
+    async fn get_custom_resource(&self, _kind: &str, _namespace: &str, _name: &str) -> Result<Option<CustomResource>> {
+        todo!("Implement get_custom_resource for PostgreSQL")
+    }
+    
+    async fn update_custom_resource_status(&self, _id: Uuid, _status: JsonValue) -> Result<()> {
+        todo!("Implement update_custom_resource_status for PostgreSQL")
+    }
+    
+    async fn delete_custom_resource(&self, _kind: &str, _namespace: &str, _name: &str) -> Result<()> {
+        todo!("Implement delete_custom_resource for PostgreSQL")
+    }
+    
+    async fn list_custom_resources(&self, _kind: &str, _namespace: Option<&str>) -> Result<Vec<CustomResource>> {
+        todo!("Implement list_custom_resources for PostgreSQL")
     }
 } 

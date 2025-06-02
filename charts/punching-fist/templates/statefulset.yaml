@@ -24,6 +24,31 @@ spec:
       serviceAccountName: {{ .Values.security.serviceAccount.name }}
       securityContext:
         {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      initContainers:
+        - name: init-database-dir
+          image: busybox:latest
+          command: 
+            - sh
+            - -c
+            - |
+              echo "Creating database directory..."
+              mkdir -p /app/data
+              echo "Setting permissions..."
+              chmod 755 /app/data
+              chown 1000:1000 /app/data
+              echo "Creating empty database file..."
+              touch /app/data/punching-fist.db
+              chown 1000:1000 /app/data/punching-fist.db
+              chmod 644 /app/data/punching-fist.db
+              echo "Directory contents:"
+              ls -la /app/data/
+              echo "Init complete!"
+          volumeMounts:
+            - name: database-storage
+              mountPath: /app/data
+          securityContext:
+            runAsUser: 0
+            runAsNonRoot: false
       containers:
         - name: {{ .Chart.Name }}
           image: "{{ .Values.global.image.repository }}:{{ .Values.global.image.tag }}"
@@ -53,39 +78,41 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.namespace
-            - name: LLM_API_KEY
+            {{- if .Values.agent.anthropicApiKey }}
+            - name: ANTHROPIC_API_KEY
               valueFrom:
                 secretKeyRef:
-                  name: {{ .Release.Name }}-secrets
-                  key: openhands-api-key
+                  name: {{ include "punching-fist.fullname" . }}-agent
+                  key: anthropic-api-key
+            {{- end }}
+            {{- if .Values.agent.openaiApiKey }}
+            - name: OPENAI_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "punching-fist.fullname" . }}-agent
+                  key: openai-api-key
+            {{- end }}
+            - name: LLM_PROVIDER
+              value: {{ .Values.agent.provider | quote }}
             - name: LLM_MODEL
-              value: {{ .Values.openhands.model | quote }}
-            - name: LOG_ALL_EVENTS
-              value: "true"
-            - name: SANDBOX_RUNTIME_CONTAINER_IMAGE
-              value: "docker.all-hands.dev/all-hands-ai/runtime:0.39-nikolaik"
+              value: {{ .Values.agent.model | quote }}
+            - name: LLM_TEMPERATURE
+              value: {{ .Values.agent.temperature | quote }}
+            - name: LLM_MAX_TOKENS
+              value: {{ .Values.agent.maxTokens | quote }}
             - name: SQLITE_PATH
               value: "/app/data/punching-fist.db"
             - name: DATABASE_TYPE
               value: "sqlite"
             - name: EXECUTION_MODE
-              value: "kubernetes"
-            - name: OPENHANDS_SECRET_NAME
-              value: {{ .Release.Name }}-secrets
-            - name: OPENHANDS_SECRET_KEY
-              value: "openhands-api-key"
+              value: {{ .Values.executionMode | quote }}
+            - name: STATIC_FILE_PATH
+              value: {{ .Values.server.staticFilePath | default "/usr/local/share/punching-fist/static" | quote }}
           volumeMounts:
-            - name: docker-sock
-              mountPath: /var/run/docker.sock
-            - name: openhands-state
-              mountPath: /.openhands-state
             - name: database-storage
               mountPath: /app/data
       volumes:
-        - name: docker-sock
-          hostPath:
-            path: /var/run/docker.sock
-        - name: openhands-state
+        - name: database-storage
           emptyDir: {}
   volumeClaimTemplates:
     - metadata:

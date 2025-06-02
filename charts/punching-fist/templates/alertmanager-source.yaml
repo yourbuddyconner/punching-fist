@@ -1,0 +1,81 @@
+{{- if .Values.prometheus.alertmanager.enabled }}
+---
+# Source: Generic webhook endpoint for all AlertManager alerts
+apiVersion: punchingfist.io/v1alpha1
+kind: Source
+metadata:
+  name: {{ include "punching-fist.fullname" . }}-alertmanager
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "punching-fist.labels" . | nindent 4 }}
+    app.kubernetes.io/component: source
+spec:
+  type: webhook
+  config:
+    path: "/webhook/alertmanager"
+    # No filters - accept all alerts
+    filters: {}
+  # Single workflow handles all alerts
+  triggerWorkflow: "{{ include "punching-fist.fullname" . }}-default-investigation"
+  context:
+    source: "alertmanager"
+    environment: {{ .Values.environment | default "production" | quote }}
+---
+# Default investigation workflow for all alerts (including test alerts)
+apiVersion: punchingfist.io/v1alpha1
+kind: Workflow
+metadata:
+  name: {{ include "punching-fist.fullname" . }}-default-investigation
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "punching-fist.labels" . | nindent 4 }}
+    app.kubernetes.io/component: workflow
+spec:
+  runtime:
+    image: "{{ .Values.global.image.repository }}:{{ .Values.global.image.tag }}"
+    llmConfig:
+      provider: "{{ .Values.agent.provider }}"
+      model: "{{ .Values.agent.model }}"
+    environment:
+      PROMETHEUS_URL: "http://{{ .Release.Name }}-prometheus-s-prometheus:9090"
+  steps:
+    - name: "analyze-alert"
+      type: "agent"
+      goal: |
+        Analyze this alert: {{ printf "{{ .source.data.alerts[0].labels.alertname }}" }}
+        
+        Alert information:
+        - Severity: {{ printf "{{ .source.data.alerts[0].labels.severity | default \"unknown\" }}" }}
+        - Namespace: {{ printf "{{ .source.data.alerts[0].labels.namespace | default \"unknown\" }}" }}
+        - Pod: {{ printf "{{ .source.data.alerts[0].labels.pod | default \"N/A\" }}" }}
+        - Service: {{ printf "{{ .source.data.alerts[0].labels.service | default \"N/A\" }}" }}
+        - Summary: {{ printf "{{ .source.data.alerts[0].annotations.summary | default \"No summary\" }}" }}
+        - Description: {{ printf "{{ .source.data.alerts[0].annotations.description | default \"No description\" }}" }}
+        
+        Please:
+        1. Understand what this alert is indicating
+        2. Check the current state of affected resources
+        3. Look for relevant metrics or logs
+        4. Identify potential root causes
+        5. Recommend actions to resolve or mitigate the issue
+        
+        Be concise but thorough in your analysis.
+      tools:
+        - name: "kubectl"
+          description: "Kubernetes command line tool"
+        - name: "promql"
+          description: "Query Prometheus metrics"
+      maxIterations: 15
+      timeoutMinutes: 10
+  outputs:
+    - name: "alert_summary"
+      value: {{ printf "{{ .steps.analyze-alert.result.summary | default \"No summary available\" }}" | quote }}
+    - name: "current_state"
+      value: {{ printf "{{ .steps.analyze-alert.result.current_state | default \"Unknown\" }}" | quote }}
+    - name: "root_cause"
+      value: {{ printf "{{ .steps.analyze-alert.result.root_cause | default \"Could not determine root cause\" }}" | quote }}
+    - name: "recommendations"
+      value: {{ printf "{{ .steps.analyze-alert.result.recommendations | default \"No recommendations available\" }}" | quote }}
+  sinks:
+    - "{{ include "punching-fist.fullname" . }}-stdout"
+{{- end }} 

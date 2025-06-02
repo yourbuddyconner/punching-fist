@@ -1,0 +1,286 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: workflows.punchingfist.io
+spec:
+  group: punchingfist.io
+  names:
+    categories: []
+    kind: Workflow
+    plural: workflows
+    shortNames: []
+    singular: workflow
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns: []
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: Auto-generated derived type for WorkflowSpec via `CustomResource`
+        properties:
+          spec:
+            properties:
+              outputs:
+                default: []
+                description: Output definitions
+                items:
+                  properties:
+                    name:
+                      description: Output name
+                      type: string
+                    value:
+                      description: Value expression
+                      type: string
+                  required:
+                  - name
+                  - value
+                  type: object
+                type: array
+              runtime:
+                description: Runtime configuration for the workflow
+                properties:
+                  environment:
+                    additionalProperties:
+                      type: string
+                    default: {}
+                    description: Environment variables
+                    type: object
+                  image:
+                    description: Container image to use for execution
+                    type: string
+                  llmConfig:
+                    description: LLM configuration
+                    properties:
+                      apiKeySecret:
+                        description: API key secret reference
+                        nullable: true
+                        type: string
+                      endpoint:
+                        description: Endpoint URL for the LLM (only needed for local/custom providers)
+                        nullable: true
+                        type: string
+                      model:
+                        description: Model to use
+                        type: string
+                      provider:
+                        description: LLM provider (local, claude, openai)
+                        type: string
+                    required:
+                    - provider
+                    - model
+                    type: object
+                required:
+                - image
+                - llmConfig
+                type: object
+              sinks:
+                description: Sinks to send results to
+                items:
+                  type: string
+                type: array
+              steps:
+                description: Steps to execute in the workflow
+                items:
+                  properties:
+                    agent:
+                      description: Nested agent configuration for conditional steps
+                      nullable: true
+                      properties:
+                        approvalRequired:
+                          default: false
+                          description: Whether approval is required before execution
+                          type: boolean
+                        goal:
+                          description: Goal for agent
+                          type: string
+                        maxIterations:
+                          description: Maximum iterations for agent
+                          format: int32
+                          nullable: true
+                          type: integer
+                        timeoutMinutes:
+                          description: Timeout in minutes
+                          format: int32
+                          nullable: true
+                          type: integer
+                        tools:
+                          default: []
+                          description: Available tools for agent
+                          items:
+                            properties:
+                              command:
+                                description: Custom command (optional)
+                                type: string
+                              description:
+                                description: Tool description
+                                type: string
+                              endpoint:
+                                description: Endpoint for API tools
+                                type: string
+                              name:
+                                description: Tool name
+                                type: string
+                            required:
+                            - name
+                            type: object
+                          type: array
+                      required:
+                      - goal
+                      type: object
+                    approvalRequired:
+                      default: false
+                      description: Whether approval is required before execution
+                      type: boolean
+                    command:
+                      description: Command to execute (for CLI steps)
+                      nullable: true
+                      type: string
+                    condition:
+                      description: Condition for conditional steps
+                      nullable: true
+                      type: string
+                    goal:
+                      description: Goal for agent (for agent steps)
+                      nullable: true
+                      type: string
+                    maxIterations:
+                      description: Maximum iterations for agent
+                      format: int32
+                      nullable: true
+                      type: integer
+                    name:
+                      description: Step name
+                      type: string
+                    timeoutMinutes:
+                      description: Timeout in minutes
+                      format: int32
+                      nullable: true
+                      type: integer
+                    tools:
+                      default: []
+                      description: Available tools for agent
+                      items:
+                        properties:
+                          command:
+                            description: Custom command (optional)
+                            type: string
+                          description:
+                            description: Tool description
+                            type: string
+                          endpoint:
+                            description: Endpoint for API tools
+                            type: string
+                          name:
+                            description: Tool name
+                            type: string
+                        required:
+                        - name
+                        type: object
+                      type: array
+                    type:
+                      description: 'Step type: cli, agent, conditional'
+                      enum:
+                      - cli
+                      - agent
+                      - conditional
+                      type: string
+                  required:
+                  - name
+                  - type
+                  type: object
+                type: array
+            required:
+            - runtime
+            - sinks
+            - steps
+            type: object
+          status:
+            nullable: true
+            properties:
+              completionTime:
+                description: Completion time
+                nullable: true
+                type: string
+              conditions:
+                default: []
+                description: Conditions
+                items:
+                  properties:
+                    lastTransitionTime:
+                      type: string
+                    message:
+                      type: string
+                    reason:
+                      type: string
+                    status:
+                      type: string
+                    type:
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+              error:
+                description: Error message if failed
+                nullable: true
+                type: string
+              outputs:
+                additionalProperties:
+                  type: string
+                default: {}
+                description: Output values
+                type: object
+              phase:
+                description: 'Current phase: pending, running, succeeded, failed'
+                type: string
+              startTime:
+                description: Start time
+                nullable: true
+                type: string
+              steps:
+                default: []
+                description: Step statuses
+                items:
+                  properties:
+                    completionTime:
+                      description: Completion time
+                      nullable: true
+                      type: string
+                    error:
+                      description: Error if failed
+                      nullable: true
+                      type: string
+                    name:
+                      description: Step name
+                      type: string
+                    phase:
+                      description: 'Step phase: pending, running, succeeded, failed'
+                      type: string
+                    result:
+                      description: Step result
+                      nullable: true
+                      type: object
+                    startTime:
+                      description: Start time
+                      nullable: true
+                      type: string
+                  required:
+                  - name
+                  - phase
+                  type: object
+                type: array
+            required:
+            - phase
+            type: object
+        required:
+        - spec
+        title: Workflow
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {} 

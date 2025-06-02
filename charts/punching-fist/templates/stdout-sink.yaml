@@ -1,0 +1,49 @@
+---
+# Generic stdout sink for all alerts
+apiVersion: punchingfist.io/v1alpha1
+kind: Sink
+metadata:
+  name: {{ include "punching-fist.fullname" . }}-stdout
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "punching-fist.labels" . | nindent 4 }}
+    app.kubernetes.io/component: sink
+spec:
+  type: stdout
+  config:
+    format: |
+      ========================================
+      ALERT INVESTIGATION RESULTS
+      ========================================
+      Alert: {{ printf "{{ .source.data.alerts[0].labels.alertname }}" }}
+      Severity: {{ printf "{{ .source.data.alerts[0].labels.severity | default \"unknown\" }}" }}
+      Namespace: {{ printf "{{ .source.data.alerts[0].labels.namespace | default \"unknown\" }}" }}
+      Pod: {{ printf "{{ .source.data.alerts[0].labels.pod | default \"N/A\" }}" }}
+      Service: {{ printf "{{ .source.data.alerts[0].labels.service | default \"N/A\" }}" }}
+      Time: {{ printf "{{ .workflow.completedAt }}" }}
+      ========================================
+      
+      ALERT SUMMARY:
+      --------------
+      {{ printf "{{ .workflow.outputs.alert_summary }}" }}
+      
+      
+      CURRENT STATE:
+      --------------
+      {{ printf "{{ .workflow.outputs.current_state }}" }}
+      
+      
+      ROOT CAUSE ANALYSIS:
+      --------------------
+      {{ printf "{{ .workflow.outputs.root_cause }}" }}
+      
+      
+      RECOMMENDATIONS:
+      ----------------
+      {{ printf "{{ .workflow.outputs.recommendations }}" }}
+      
+      ========================================
+      Workflow: {{ printf "{{ .workflow.name }}" }}
+      Duration: {{ printf "{{ .workflow.duration }}" }}
+      Status: {{ printf "{{ .workflow.status }}" }}
+      ======================================== 

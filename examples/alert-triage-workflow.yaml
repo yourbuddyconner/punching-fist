@@ -1,0 +1,95 @@
+# Example Workflow for automated alert triage with LLM agent
+apiVersion: punchingfist.io/v1alpha1
+kind: Workflow
+metadata:
+  name: alert-triage-workflow
+  namespace: punchingfist-system
+spec:
+  runtime:
+    image: "punchingfist/runtime:v1.0.0"
+    llmConfig:
+      provider: "local"
+      endpoint: "http://llm-service:8080"
+      model: "llama-3.1-70b"
+      # For cloud providers:
+      # provider: "claude"
+      # model: "claude-3-sonnet-20240229"
+      # apiKeySecret: "llm-api-key"
+    environment:
+      PROMETHEUS_URL: "http://prometheus:9090"
+      
+  steps:
+    - name: "gather-context"
+      type: "cli"
+      command: |
+        echo "=== Alert Details ==="
+        echo "Alert: {{ .source.data.alert.alertname }}"
+        echo "Summary: {{ .source.data.alert.summary }}"
+        echo "Labels: {{ .source.data.alert.labels | toJSON }}"
+        echo "Severity: {{ .source.data.alert.labels.severity }}"
+        echo "Namespace: {{ .source.data.alert.labels.namespace }}"
+        echo "Service: {{ .source.data.alert.labels.service }}"
+    
+    - name: "investigate-alert"
+      type: "agent"
+      goal: |
+        I need to investigate this alert and determine the root cause.
+        
+        Alert Information:
+        - Alert: {{ .source.data.alert.alertname }}
+        - Summary: {{ .source.data.alert.summary }}
+        - Affected Service: {{ .source.data.alert.labels.service }}
+        - Namespace: {{ .source.data.alert.labels.namespace }}
+        - Severity: {{ .source.data.alert.labels.severity }}
+        
+        Please investigate by:
+        1. Checking the current state of the affected resources
+        2. Looking at recent logs for errors or issues
+        3. Checking relevant metrics from Prometheus
+        4. Determining if this is a known issue with a known solution
+        5. Recommending next steps - either auto-resolution or escalation
+        
+        Be thorough but concise in your investigation.
+      
+      tools:
+        - name: "kubectl"
+          description: "Kubernetes command line tool for cluster inspection"
+        - name: "promql"
+          description: "Query Prometheus metrics"
+          endpoint: "{{ .env.PROMETHEUS_URL }}"
+        - name: "curl"
+          description: "HTTP client for API calls"
+      
+      maxIterations: 10
+      timeoutMinutes: 5
+      
+    - name: "attempt-resolution"
+      type: "conditional"
+      condition: "{{ .steps.investigate-alert.result.can_auto_resolve }}"
+      agent:
+        goal: |
+          Based on the investigation, I can attempt to resolve this issue automatically.
+          
+          Issue Summary: {{ .steps.investigate-alert.result.issue_summary }}
+          Proposed Fix: {{ .steps.investigate-alert.result.proposed_fix }}
+          
+          Please execute the fix safely and verify it worked.
+        tools: ["kubectl"]
+        maxIterations: 3
+        approvalRequired: false  # Set to true for production
+  
+  outputs:
+    - name: "investigation_summary"
+      value: "{{ .steps.investigate-alert.result.summary }}"
+    - name: "root_cause"
+      value: "{{ .steps.investigate-alert.result.root_cause }}"
+    - name: "severity_assessment"
+      value: "{{ .steps.investigate-alert.result.severity_assessment }}"
+    - name: "auto_resolved"
+      value: "{{ .steps.attempt-resolution.success | default false }}"
+    - name: "recommendations"
+      value: "{{ .steps.investigate-alert.result.recommendations }}"
+  
+  sinks:
+    - "slack-ops-channel"
+    - "alertmanager-update" 

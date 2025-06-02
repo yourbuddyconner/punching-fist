@@ -1,83 +1,77 @@
 mod routes;
-mod receivers;
 
 use axum::{
+    extract::State,
     routing::{get, post},
     Router,
 };
 use std::sync::Arc;
-use tokio::sync::Mutex;
-use std::net::SocketAddr;
-use tracing;
+use tower_http::{
+    trace::TraceLayer,
+    services::fs::ServeDir,
+};
+use tracing::info;
 
 use crate::{
     config::Config,
-    scheduler::TaskScheduler,
-    store::{AlertRecord, Store, TaskRecord, TaskStatus},
-    OperatorError,
+    sources::WebhookHandler,
+    store::Store,
+    // Removed old imports: AlertRecord, TaskRecord, TaskStatus
 };
-use receivers::{AlertReceiver, PrometheusReceiver, PrometheusConfig};
-
-pub use receivers::Alert;
 
 pub struct Server {
-    scheduler: Arc<Mutex<TaskScheduler>>,
-    receiver: Arc<dyn AlertReceiver>,
     store: Arc<dyn Store>,
+    pub webhook_handler: Arc<WebhookHandler>,
 }
 
 impl Server {
-    pub fn new(config: &Config, scheduler: Arc<Mutex<TaskScheduler>>, store: Arc<dyn Store>) -> Self {
-        let receiver = Arc::new(PrometheusReceiver::new(PrometheusConfig::default()));
-        Self {
-            scheduler,
-            receiver,
-            store,
-        }
+    pub fn new(
+        _config: &Config, 
+        store: Arc<dyn Store>,
+        webhook_handler: Arc<WebhookHandler>,
+    ) -> Self {
+        Self { store, webhook_handler }
     }
 
-    pub async fn start(&self, addr: &str) -> crate::Result<()> {
-        let app = Router::new()
-            .route("/health", get(routes::health_check))
+    pub fn build_router(self) -> Router {
+        let state = Arc::new(self);
+
+        // Get static file path from environment variable or use defaults
+        let static_path = std::env::var("STATIC_FILE_PATH")
+            .unwrap_or_else(|_| {
+                // If env var not set, check for common paths
+                if std::path::Path::new("crates/operator/static").exists() {
+                    "crates/operator/static".to_string()
+                } else if std::path::Path::new("/usr/local/share/punching-fist/static").exists() {
+                    "/usr/local/share/punching-fist/static".to_string()
+                } else {
+                    // Fallback to development path
+                    "crates/operator/static".to_string()
+                }
+            });
+
+        info!("Serving static files from: {}", static_path);
+
+        Router::new()
+            .route("/", get(routes::root))
+            .route("/health", get(routes::health))
+            // Alert endpoints
+            .route("/alerts", post(routes::create_alert))
+            .route("/alerts", get(routes::list_alerts))
+            .route("/alerts/{id}", get(routes::get_alert))
+            // Workflow endpoints
+            .route("/workflows", get(routes::list_workflows))
+            .route("/workflows/{id}", get(routes::get_workflow))
+            .route("/workflows/{id}/steps", get(routes::list_workflow_steps))
+            .route("/workflows/{id}/outputs", get(routes::list_workflow_outputs))
+            // Source event endpoints
+            .route("/source-events", get(routes::list_source_events))
+            // Webhook and metrics
+            .route("/webhook/{*path}", post(routes::webhook_alerts))
             .route("/metrics", get(routes::metrics))
-            .route("/alerts", post(routes::alert_handler))
-            .route("/alerts/prometheus", post(routes::prometheus_alert_handler))
-            .with_state(Arc::new(ServerState {
-                scheduler: self.scheduler.clone(),
-                receiver: self.receiver.clone(),
-                store: self.store.clone(),
-            }));
-
-        let addr = match addr.parse::<SocketAddr>() {
-            Ok(addr) => addr,
-            Err(e) => {
-                tracing::error!("Failed to parse address {}: {}", addr, e);
-                return Err(OperatorError::Config(format!("Invalid address: {}", e)));
-            }
-        };
-
-        let listener = match tokio::net::TcpListener::bind(addr).await {
-            Ok(listener) => listener,
-            Err(e) => {
-                tracing::error!("Failed to bind to {}: {}", addr, e);
-                return Err(OperatorError::Config(format!("Failed to bind to address: {}", e)));
-            }
-        };
-
-        tracing::info!("Server listening on {}", addr);
-        
-        if let Err(e) = axum::serve(listener, app).await {
-            tracing::error!("Server error: {}", e);
-            return Err(OperatorError::Config(format!("Server error: {}", e)));
-        }
-
-        Ok(())
+            // Serve UI at /ui and /ui/* 
+            .nest_service("/ui", ServeDir::new(static_path))
+            .layer(TraceLayer::new_for_http())
+            .with_state(state)
     }
-}
-
-#[derive(Clone)]
-pub struct ServerState {
-    scheduler: Arc<Mutex<TaskScheduler>>,
-    receiver: Arc<dyn AlertReceiver>,
-    store: Arc<dyn Store>,
 } 

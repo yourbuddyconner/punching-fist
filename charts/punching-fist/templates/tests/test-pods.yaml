@@ -1,0 +1,141 @@
+{{- if .Values.testResources.enabled }}
+---
+# Healthy pod
+apiVersion: v1
+kind: Pod
+metadata:
+  name: healthy-app
+  namespace: {{ .Values.testResources.namespace }}
+  labels:
+    {{- include "punching-fist.labels" . | nindent 4 }}
+    app: test-app
+    status: healthy
+    test-resources: "true"
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "8080"
+    prometheus.io/path: "/metrics"
+spec:
+  containers:
+  - name: app
+    image: nginx:alpine
+    ports:
+    - containerPort: 80
+    resources:
+      requests:
+        memory: "64Mi"
+        cpu: "50m"
+      limits:
+        memory: "128Mi"
+        cpu: "100m"
+---
+# Pod with high memory usage
+apiVersion: v1
+kind: Pod
+metadata:
+  name: memory-hog
+  namespace: {{ .Values.testResources.namespace }}
+  labels:
+    {{- include "punching-fist.labels" . | nindent 4 }}
+    app: test-app
+    status: memory-issue
+    test-resources: "true"
+spec:
+  containers:
+  - name: memory-consumer
+    image: polinux/stress
+    command: ["stress"]
+    args: ["--vm", "1", "--vm-bytes", "150M", "--vm-hang", "1"]
+    resources:
+      requests:
+        memory: "64Mi"
+        cpu: "50m"
+      limits:
+        memory: "256Mi"
+        cpu: "100m"
+---
+# Pod with restart issues
+apiVersion: v1
+kind: Pod
+metadata:
+  name: crashloop-app
+  namespace: {{ .Values.testResources.namespace }}
+  labels:
+    {{- include "punching-fist.labels" . | nindent 4 }}
+    app: test-app
+    status: crashloop
+    test-resources: "true"
+spec:
+  containers:
+  - name: failing-app
+    image: busybox
+    command: ["sh", "-c", "echo 'Starting crashloop test pod...'; sleep 300; echo 'Crashing after 5 minutes!'; exit 1"]
+    resources:
+      requests:
+        memory: "32Mi"
+        cpu: "10m"
+      limits:
+        memory: "64Mi"
+        cpu: "50m"
+---
+# Pod with CPU stress
+apiVersion: v1
+kind: Pod
+metadata:
+  name: cpu-intensive
+  namespace: {{ .Values.testResources.namespace }}
+  labels:
+    {{- include "punching-fist.labels" . | nindent 4 }}
+    app: test-app
+    status: cpu-issue
+    test-resources: "true"
+spec:
+  containers:
+  - name: cpu-consumer
+    image: polinux/stress
+    command: ["stress"]
+    args: ["--cpu", "1"]
+    resources:
+      requests:
+        memory: "32Mi"
+        cpu: "100m"
+      limits:
+        memory: "64Mi"
+        cpu: "200m"
+---
+# ConfigMap for test configuration
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: test-config
+  namespace: {{ .Values.testResources.namespace }}
+  labels:
+    {{- include "punching-fist.labels" . | nindent 4 }}
+    test-resources: "true"
+data:
+  test.properties: |
+    # Test configuration
+    environment=test
+    debug=true
+    log_level=info
+---
+# Service for test pods
+apiVersion: v1
+kind: Service
+metadata:
+  name: test-service
+  namespace: {{ .Values.testResources.namespace }}
+  labels:
+    {{- include "punching-fist.labels" . | nindent 4 }}
+    test-resources: "true"
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "80"
+spec:
+  selector:
+    app: test-app
+  ports:
+  - port: 80
+    targetPort: 80
+    name: http
+{{- end }} 

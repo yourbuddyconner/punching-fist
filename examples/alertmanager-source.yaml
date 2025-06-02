@@ -1,0 +1,21 @@
+# Example Source resource for receiving alerts from AlertManager
+apiVersion: punchingfist.io/v1alpha1
+kind: Source
+metadata:
+  name: alertmanager-critical
+  namespace: punchingfist-system
+spec:
+  type: webhook
+  config:
+    path: "/webhook/alerts"
+    filters:
+      severity: ["critical", "warning"]
+      alertname: ["HighCPUUsage", "PodCrashLooping", "ServiceDown"]
+    # Optional authentication
+    # authentication:
+    #   type: "bearer"
+    #   secretRef: "alertmanager-webhook-secret"
+  triggerWorkflow: "alert-triage-workflow"
+  context:
+    runbookRepo: "https://github.com/company/runbooks"
+    environment: "production" 

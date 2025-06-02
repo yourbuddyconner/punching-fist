@@ -1,0 +1,123 @@
+# Complete example setup for Punching Fist Operator Phase 1
+# This demonstrates the full Source → Workflow → Sink pipeline
+---
+# Namespace for the operator
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: punchingfist-system
+---
+# Secret for Slack bot token
+apiVersion: v1
+kind: Secret
+metadata:
+  name: slack-bot-token-secret
+  namespace: punchingfist-system
+type: Opaque
+stringData:
+  token: "xoxb-your-slack-bot-token"
+---
+# Source: Webhook endpoint for AlertManager
+apiVersion: punchingfist.io/v1alpha1
+kind: Source
+metadata:
+  name: alertmanager-webhook
+  namespace: punchingfist-system
+spec:
+  type: webhook
+  config:
+    path: "/webhook/alerts"
+    filters:
+      severity: ["critical", "warning"]
+  triggerWorkflow: "alert-investigation"
+  context:
+    environment: "production"
+---
+# Workflow: LLM-powered alert investigation
+apiVersion: punchingfist.io/v1alpha1
+kind: Workflow
+metadata:
+  name: alert-investigation
+  namespace: punchingfist-system
+spec:
+  runtime:
+    image: "punchingfist/runtime:v1.0.0"
+    llmConfig:
+      provider: "local"
+      endpoint: "http://llm-service:8080"
+      model: "llama-3.1-70b"
+    environment:
+      PROMETHEUS_URL: "http://prometheus:9090"
+      
+  steps:
+    - name: "analyze"
+      type: "agent"
+      goal: |
+        Investigate the alert: {{ .source.data.alert.alertname }}
+        Summary: {{ .source.data.alert.summary }}
+        
+        Determine:
+        1. What is the exact problem?
+        2. What is the root cause?
+        3. Can it be fixed automatically?
+        4. What should the on-call engineer know?
+      tools:
+        - "kubectl"
+        - "promql"
+        - "curl"
+      maxIterations: 10
+      timeoutMinutes: 5
+      
+  outputs:
+    - name: "summary"
+      value: "{{ .steps.analyze.result.summary }}"
+    - name: "root_cause"
+      value: "{{ .steps.analyze.result.root_cause }}"
+    - name: "can_auto_fix"
+      value: "{{ .steps.analyze.result.can_auto_fix }}"
+    - name: "recommendations"
+      value: "{{ .steps.analyze.result.recommendations }}"
+  
+  sinks:
+    - "slack-notifications"
+    - "alertmanager-annotate"
+---
+# Sink: Slack notifications
+apiVersion: punchingfist.io/v1alpha1
+kind: Sink
+metadata:
+  name: slack-notifications
+  namespace: punchingfist-system
+spec:
+  type: slack
+  config:
+    channel: "#alerts"
+    botToken: "slack-bot-token-secret"
+    template: |
+      🤖 *AI Alert Analysis*
+      
+      *Alert:* {{ .source.data.alert.alertname }}
+      *Summary:* {{ .workflow.outputs.summary }}
+      *Root Cause:* {{ .workflow.outputs.root_cause }}
+      
+      *Recommendations:*
+      {{ .workflow.outputs.recommendations }}
+---
+# Sink: Update AlertManager with analysis
+apiVersion: punchingfist.io/v1alpha1
+kind: Sink
+metadata:
+  name: alertmanager-annotate
+  namespace: punchingfist-system
+spec:
+  type: alertmanager
+  config:
+    endpoint: "http://alertmanager:9093"
+    action: "annotate"
+    template: |
+      {
+        "annotations": {
+          "ai_analysis": "{{ .workflow.outputs.summary }}",
+          "ai_root_cause": "{{ .workflow.outputs.root_cause }}"
+        }
+      } 

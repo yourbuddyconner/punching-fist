@@ -53,4 +53,7 @@ Thumbs.db
 .env.production
 
 # By-products of [Rrustdoc
-/doc/ 
+/doc/
+
+# Environment variables
+.env 
