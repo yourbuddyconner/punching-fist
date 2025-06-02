@@ -42,6 +42,31 @@ pub trait LLMProvider: Send + Sync {
     async fn prompt(&self, prompt: &str) -> Result<String>;
 }
 
+/// Map user-friendly model names to correct Anthropic API identifiers
+/// Based on: https://docs.anthropic.com/en/docs/about-claude/models/overview
+pub fn map_anthropic_model(model: &str) -> &'static str {
+    match model {
+        // Claude 3.5 Sonnet variations
+        "claude-3-5-sonnet" | "claude-3-5-sonnet-20241022" | "claude-3-5-sonnet-latest" => "claude-3-5-sonnet-latest",
+        // Claude 3.7 Sonnet variations  
+        "claude-3-7-sonnet" | "claude-3-7-sonnet-20250219" | "claude-3-7-sonnet-latest" => "claude-3-7-sonnet-latest",
+        // Claude 3.5 Haiku variations
+        "claude-3-5-haiku" | "claude-3-5-haiku-20241022" | "claude-3-5-haiku-latest" => "claude-3-5-haiku-latest",
+        // Claude 3 Haiku variations
+        "claude-3-haiku" | "claude-3-haiku-20240307" => "claude-3-haiku-20240307",
+        // Claude 3 Opus variations
+        "claude-3-opus" | "claude-3-opus-20240229" | "claude-3-opus-latest" => "claude-3-opus-latest",
+        // Claude 3 Sonnet variations
+        "claude-3-sonnet" | "claude-3-sonnet-20240229" => "claude-3-sonnet-20240229",
+        // Claude 4 Sonnet variations
+        "claude-4-sonnet" | "claude-sonnet-4-20250514" => "claude-sonnet-4-20250514",
+        // Claude 4 Opus variations
+        "claude-4-opus" | "claude-opus-4-20250514" => "claude-opus-4-20250514",
+        // Default to latest Sonnet 3.5 for unknown models
+        _ => "claude-3-5-sonnet-latest",
+    }
+}
+
 /// Anthropic Claude provider using Rig
 pub struct AnthropicProvider {
     client: anthropic::Client,
@@ -70,15 +95,8 @@ impl AnthropicProvider {
     }
     
     /// Map model name to Rig's model constant
-    fn get_model_id(&self) -> &'static str {
-        match self.model.as_str() {
-            "claude-3-5-sonnet" | "claude-3-5-sonnet-20241022" => anthropic::CLAUDE_3_5_SONNET,
-            "claude-3-7-sonnet" => anthropic::CLAUDE_3_7_SONNET,
-            "claude-3-haiku" | "claude-3-haiku-20240307" => anthropic::CLAUDE_3_HAIKU,
-            "claude-3-opus" | "claude-3-opus-20240229" => anthropic::CLAUDE_3_OPUS,
-            "claude-3-sonnet" | "claude-3-sonnet-20240229" => anthropic::CLAUDE_3_SONNET,
-            _ => anthropic::CLAUDE_3_5_SONNET, // Default
-        }
+    fn get_model_id(&self) -> &str {
+        map_anthropic_model(&self.model)
     }
 }
 
@@ -170,6 +188,44 @@ impl LLMProvider for MockProvider {
         } else {
             Ok(format!("Investigating: {}...\n\nUnable to determine root cause. Manual investigation required.", 
                 &prompt.chars().take(50).collect::<String>()))
+        }
+    }
+}
+
+/// Enum wrapper for concrete LLM provider types
+/// This is used in agent implementations that need to access provider-specific functionality
+pub enum LLMProviderType {
+    Anthropic(anthropic::Client),
+    OpenAI(openai::Client),
+    Mock,
+}
+
+impl LLMProviderType {
+    /// Create from configuration
+    pub fn from_config(config: &LLMConfig) -> Result<Self> {
+        match config.provider.as_str() {
+            "anthropic" | "claude" => {
+                let client = if let Some(key) = &config.api_key {
+                    anthropic::Client::new(
+                        key,
+                        "https://api.anthropic.com",
+                        None,
+                        anthropic::ANTHROPIC_VERSION_LATEST,
+                    )
+                } else {
+                    anthropic::Client::from_env()
+                };
+                Ok(LLMProviderType::Anthropic(client))
+            }
+            "openai" => {
+                let client = if let Some(key) = &config.api_key {
+                    openai::Client::new(key)
+                } else {
+                    openai::Client::from_env()
+                };
+                Ok(LLMProviderType::OpenAI(client))
+            }
+            _ => Ok(LLMProviderType::Mock),
         }
     }
 }

@@ -711,44 +711,317 @@ pub struct CurlTool {
 }
 ```
 
-#### **3. Agent Runtime**
+#### **3. Agent Runtime and Behavior Abstraction**
+
+The `AgentRuntime` is responsible for configuring and providing instances of different agent behaviors. It acts as a central point for accessing shared resources like LLM providers, tool registries, and safety validators. The core of the pluggable agent system is the `AgentBehavior` trait.
+
 ```rust
-// crates/operator/src/agent/runtime.rs
-use rig::{agent::Agent, completion::Prompt};
+// crates/operator/src/agent/runtime.rs (conceptual)
+
+// Shared context for all agent behaviors
+pub struct AgentContext {
+    llm_provider: Arc<LLMProvider>, // Using Arc for shared ownership
+    tools: Arc<HashMap<String, Box<dyn Tool + Send + Sync>>>, // Tool registry
+    k8s_client: Option<K8sClient>,
+    prometheus_endpoint: String,
+    safety_validator: Arc<SafetyValidator>,
+    // Potentially other shared resources like runbook access, config, etc.
+}
+
+// Defines the types of input an agent behavior can process
+pub enum AgentInput {
+    ChatMessage {
+        content: String,
+        history: Vec<rig::completion::Message>, // Using Rig's Message type
+        session_id: Option<String>, // For stateful chat sessions
+    },
+    InvestigationGoal {
+        goal: String,
+        initial_data: serde_json::Value, // Context for the investigation
+        workflow_id: String, // To track workflow context
+    },
+    ResumeInvestigation {
+        original_goal: String, // The original goal
+        approval_response: HumanApprovalResponse, // Feedback from human
+        saved_state: serde_json::Value, // State to resume from
+        workflow_id: String,
+    },
+}
+
+// Defines the types of output an agent behavior can produce
+pub enum AgentOutput {
+    ChatResponse {
+        message: String,
+        tool_calls_this_turn: Option<Vec<rig::completion::ToolCall>>, // If any tools were directly invoked
+        session_id: Option<String>,
+    },
+    InvestigationUpdate {
+        status: String, // e.g., "Tool X called", "Analyzing data"
+        findings_so_far: Vec<String>, // Or a more structured Finding type
+        workflow_id: String,
+    },
+    PendingHumanApproval {
+        request_message: String, // What needs approval
+        options: Vec<String>, // e.g., ["Proceed", "Abort", "Modify X"]
+        current_investigation_state: serde_json::Value, // State to resume if approved
+        workflow_id: String,
+    },
+    FinalInvestigationResult(AgentResult), // Using existing AgentResult type
+    Error {
+        message: String,
+        workflow_id: Option<String>,
+    },
+}
+
+pub struct HumanApprovalResponse {
+    pub approved: bool,
+    pub feedback: Option<String>, // Additional instructions or modifications
+    pub selected_option: Option<String>,
+}
+
+// Core trait for all agent behaviors
+#[async_trait::async_trait]
+pub trait AgentBehavior: Send + Sync {
+    async fn handle(&self, input: AgentInput, context: Arc<AgentContext>) -> Result<AgentOutput, anyhow::Error>;
+}
 
 pub struct AgentRuntime {
-    provider: LLMProvider,
-    tools: Vec<Box<dyn Tool>>,
-    max_iterations: u32,
+    // Holds shared resources and configurations
+    // e.g., LLMConfig, SafetyConfig, Prometheus URL, etc.
+    // This context will be used to initialize the AgentContext for each handle call
+    // or when creating agent behavior instances.
+    base_context: AgentContext, // Or components needed to build it
 }
 
 impl AgentRuntime {
-    pub async fn investigate(&self, goal: &str, context: &WorkflowContext) -> Result<AgentResult> {
-        // Build agent with tools
-        let agent = self.provider
-            .agent("investigation")
-            .preamble(INVESTIGATION_PREAMBLE)
-            .tools(&self.tools)
-            .max_iterations(self.max_iterations)
-            .build();
+    pub fn new(/* config parameters */) -> Self {
+        // Initialize base_context with shared resources
+        // ...
+        unimplemented!()
+    }
 
-        // Create investigation prompt with context
-        let prompt = format!(
-            "Goal: {}\n\nContext:\n{}",
-            goal,
-            serde_json::to_string_pretty(&context)?
-        );
+    // Method to get a specific agent behavior instance
+    // This could return a Box<dyn AgentBehavior> or a concrete type.
+    pub fn get_chatbot_agent(&self /* specific configs */) -> ChatbotAgent {
+        ChatbotAgent::new(/* pass Arc<AgentContext> or necessary parts from self.base_context */)
+    }
 
-        // Execute agent reasoning loop
-        let response = agent.prompt(&prompt).await?;
+    pub fn get_investigator_agent(&self /* specific configs */) -> InvestigatorAgent {
+        InvestigatorAgent::new(/* pass Arc<AgentContext> or necessary parts */)
+    }
+}
+```
+
+This revised `AgentRuntime` now serves as a factory or provider for different agent behaviors, each implementing the `AgentBehavior` trait.
+
+#### **4. Agent Behavior Implementations**
+
+##### **a. ChatbotAgent**
+
+-   **Purpose**: Designed for synchronous, interactive conversations. Ideal for integrations like Slack, a CLI, or direct API calls where users expect immediate, conversational responses.
+-   **Interaction**: Typically handles one user message at a time and returns a response. It can use tools to answer questions or perform actions requested by the user.
+-   **State Management**: Manages conversation history. Each `AgentInput::ChatMessage` would include the history, and the `AgentContext` could provide mechanisms for persisting/retrieving this history if needed across stateless calls (e.g., using `session_id`).
+-   **Rig Usage**:
+    -   Primarily leverages Rig's `Chat` trait (`rig::completion::Chat`) for managing conversational context and generating responses.
+    -   Can use `rig::tool::Tool` definitions for any tools it needs to execute based on user requests.
+    -   If a more complex reasoning loop is needed for a single turn (e.g., multiple tool calls to answer one question), it might use a short-lived `rig::Agent` configured for a small number of iterations.
+-   **Example Flow**:
+    1.  User sends a message (e.g., "What's the status of pod X?").
+    2.  `AgentInput::ChatMessage` is created.
+    3.  `ChatbotAgent::handle` is called.
+    4.  Agent uses Rig's `Chat` trait, possibly invoking a `KubectlTool`.
+    5.  Returns `AgentOutput::ChatResponse` with the pod status.
+
+```rust
+// Conceptual structure for ChatbotAgent
+pub struct ChatbotAgent {
+    context: Arc<AgentContext>, // Or relevant parts of it
+}
+
+impl ChatbotAgent {
+    pub fn new(context: Arc<AgentContext>) -> Self { Self { context } }
+}
+
+#[async_trait::async_trait]
+impl AgentBehavior for ChatbotAgent {
+    async fn handle(&self, input: AgentInput, context: Arc<AgentContext>) -> Result<AgentOutput, anyhow::Error> {
+        match input {
+            AgentInput::ChatMessage { content, history, session_id } => {
+                // Use context.llm_provider (which might offer a Rig client)
+                // and context.tools to interact with Rig's Chat trait or a simple Agent.
+                // For example:
+                // let rig_chat_agent = context.llm_provider.chat_client().agent("chatbot_model").tools(&context.tools);
+                // let response_str = rig_chat_agent.chat(&content, history).await?;
+
+                // This is a simplified conceptual flow.
+                // The actual implementation would involve creating a Rig Agent or using the Chat trait.
+                // It would need to map the tools from AgentContext to the Rig agent.
+
+                let llm_client = &context.llm_provider; // Assuming this gives access to Rig's client
+                let available_tools = context.tools.values().map(|t| t.as_ref()).collect::<Vec<_>>(); // Example of getting tools
+
+                // Simplified: using a high-level chat interface from Rig
+                // This assumes the LLMProvider offers such a direct chat method or a Rig Agent.
+                // Example:
+                // let response = llm_client.chat_with_tools(
+                // &content,
+                // history,
+                // available_tools
+                // ).await?;
+                // For now, let's mock a response.
+                let response_message = format!("Responding to: {}", content);
+
+                Ok(AgentOutput::ChatResponse {
+                    message: response_message, // Placeholder
+                    tool_calls_this_turn: None, // Populate if tools were called
+                    session_id,
+                })
+            }
+            _ => Err(anyhow::anyhow!("Invalid input type for ChatbotAgent")),
+        }
+    }
+}
+```
+
+##### **b. InvestigatorAgent**
+
+-   **Purpose**: Designed for autonomous, potentially long-running investigations, typically triggered by workflows (e.g., in response to an alert). It aims to determine root causes, gather evidence, and suggest or perform remediations.
+-   **Interaction**:
+    -   Can execute multi-step reasoning loops, involving multiple tool calls and LLM interactions.
+    -   Supports **human-in-the-loop**: Can pause its execution and request human approval or feedback before proceeding with sensitive actions or when uncertain.
+-   **State Management**:
+    -   Manages its own internal state across the investigation lifecycle.
+    -   When pausing for human approval, it serializes its current state into `AgentOutput::PendingHumanApproval`.
+    -   Resumes from `AgentInput::ResumeInvestigation`, using the provided `saved_state`.
+-   **Rig Usage**:
+    -   Heavily relies on `rig::Agent` for its autonomous reasoning loops, tool execution, and managing iterations (`max_iterations`).
+    -   The agent's preamble and goals will be constructed based on the `AgentInput::InvestigationGoal`.
+    -   For fine-grained control over the decision to request human intervention (e.g., after a specific tool call or based on LLM output), the `InvestigatorAgent` might implement its own loop using Rig's lower-level `Completion` trait, or configure the `rig::Agent` with callbacks/hooks if Rig supports such a feature for external decision points.
+-   **Example Flow (with Human Intervention)**:
+    1.  Workflow triggers an investigation with `AgentInput::InvestigationGoal`.
+    2.  `InvestigatorAgent::handle` starts.
+    3.  Agent uses `rig::Agent` to run initial diagnostic steps (e.g., check logs, metrics).
+    4.  LLM suggests a potentially risky action (e.g., "delete pod X").
+    5.  `InvestigatorAgent` decides to seek approval: returns `AgentOutput::PendingHumanApproval` with `current_investigation_state`.
+    6.  Workflow engine routes this to a human (e.g., via Slack Sink).
+    7.  Human approves.
+    8.  Workflow calls `InvestigatorAgent::handle` with `AgentInput::ResumeInvestigation` (containing approval and `saved_state`).
+    9.  Agent resumes, executes the action, and continues investigation.
+    10. Finally, returns `AgentOutput::FinalInvestigationResult`.
+
+```rust
+// Conceptual structure for InvestigatorAgent
+pub struct InvestigatorAgent {
+    context: Arc<AgentContext>,
+    // Potentially specific configs like max_iterations_override, default_preamble, etc.
+}
+
+impl InvestigatorAgent {
+    pub fn new(context: Arc<AgentContext>) -> Self { Self { context } }
+
+    // Helper to build and run a Rig agent for a part of the investigation
+    async fn run_rig_investigation_step(
+        &self,
+        goal: &str,
+        // chat_history: Vec<rig::completion::Message>, // If maintaining internal chat history for the rig::Agent
+        iteration_limit: u32,
+        _current_data: &serde_json::Value, // To be used in prompt
+    ) -> Result<String, anyhow::Error> { // Returns raw LLM response for further parsing
+        let llm_client = &self.context.llm_provider; // Assuming this provides a Rig client
         
-        // Parse and structure results
-        Ok(AgentResult {
-            findings: response.content,
-            confidence: response.metadata.confidence,
-            actions_taken: response.tool_calls,
-            recommendations: self.extract_recommendations(&response),
-        })
+        // This is a placeholder for how one might construct and use a rig::Agent
+        // The actual Rig API for agent creation and tool integration would be used here.
+        // let rig_agent_builder = llm_client.agent("investigator_model")
+        // .preamble("You are an investigator agent...")
+        // .tools(self.context.tools.values().map(|t| t.as_ref()).collect())
+        // .max_iterations(iteration_limit);
+        // let rig_agent = rig_agent_builder.build();
+        // let response = rig_agent.prompt(goal).await?; // or .chat() if using history
+
+        // Mocked response for now
+        Ok(format!("Investigation step for goal '{}' completed. Found: ... AUTO-FIX: yes, kubectl delete pod xyz", goal))
+    }
+}
+
+#[async_trait::async_trait]
+impl AgentBehavior for InvestigatorAgent {
+    async fn handle(&self, input: AgentInput, context: Arc<AgentContext>) -> Result<AgentOutput, anyhow::Error> {
+        match input {
+            AgentInput::InvestigationGoal { goal, initial_data, workflow_id } => {
+                // Initial investigation step
+                let response_str = self.run_rig_investigation_step(&goal, 5, &initial_data).await?;
+
+                // Parse response_str to determine next action:
+                // - Is human approval needed?
+                // - Is it a final result?
+                // - Is it an intermediate update?
+
+                // Example decision logic (simplified):
+                if response_str.contains("AUTO-FIX: yes") && response_str.contains("kubectl delete") {
+                    Ok(AgentOutput::PendingHumanApproval {
+                        request_message: format!("Found a potential fix: {}. Do you approve?", response_str),
+                        options: vec!["Approve".to_string(), "Deny".to_string()],
+                        current_investigation_state: serde_json::json!({ "last_response": response_str, "original_goal": goal }),
+                        workflow_id,
+                    })
+                } else {
+                    // For now, assume it's a final result if no approval needed.
+                    // In reality, this would parse into the AgentResult struct.
+                    let agent_result = AgentResult { // Placeholder
+                        summary: "Investigation complete.".to_string(),
+                        root_cause: Some(response_str),
+                        findings: vec![],
+                        recommendations: vec![],
+                        actions_taken: vec![],
+                        can_auto_fix: false,
+                        fix_command: None,
+                        confidence: 0.8,
+                        error_message: None,
+                        timestamp: chrono::Utc::now(),
+                    };
+                    Ok(AgentOutput::FinalInvestigationResult(agent_result))
+                }
+            }
+            AgentInput::ResumeInvestigation { original_goal, approval_response, saved_state, workflow_id } => {
+                if approval_response.approved {
+                    let last_response = saved_state.get("last_response").and_then(|v| v.as_str()).unwrap_or("");
+                    // Execute the approved action (e.g., parse fix_command from last_response and run it)
+                    // For now, just acknowledge.
+                    let summary = format!("Action approved for goal: {}. Original finding: {}. Human feedback: {:?}", original_goal, last_response, approval_response.feedback);
+                     let agent_result = AgentResult { // Placeholder
+                        summary,
+                        root_cause: Some(last_response.to_string()),
+                        // ... populate other fields ...
+                        findings: vec![],
+                        recommendations: vec![],
+                        actions_taken: vec![],
+                        can_auto_fix: true, // Assuming it was a fix
+                        fix_command: Some("kubectl delete pod xyz".to_string()), // Extracted from last_response
+                        confidence: 0.95,
+                        error_message: None,
+                        timestamp: chrono::Utc::now(),
+                    };
+                    Ok(AgentOutput::FinalInvestigationResult(agent_result))
+                } else {
+                    let summary = format!("Action denied for goal: {}. Investigation halted.", original_goal);
+                    let agent_result = AgentResult { // Placeholder
+                        summary,
+                        // ...
+                        root_cause: None,
+                        findings: vec![],
+                        recommendations: vec![],
+                        actions_taken: vec![],
+                        can_auto_fix: false,
+                        fix_command: None,
+                        confidence: 0.5, // Lower confidence as it was halted
+                        error_message: Some("Human intervention denied the proposed fix.".to_string()),
+                        timestamp: chrono::Utc::now(),
+                    };
+                    Ok(AgentOutput::FinalInvestigationResult(agent_result))
+                }
+            }
+            _ => Err(anyhow::anyhow!("Invalid input type for InvestigatorAgent")),
+        }
     }
 }
 ```

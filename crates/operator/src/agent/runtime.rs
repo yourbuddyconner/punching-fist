@@ -1,13 +1,20 @@
 //! Agent Runtime
 //! 
-//! Core agent execution engine that uses Rig's agent system with integrated tools.
+//! Central runtime for agent creation and execution
 
 use super::{
-    provider::{LLMProvider, LLMConfig},
-    result::{AgentResult, ActionTaken, Finding, FindingSeverity, Recommendation, RiskLevel},
+    behavior::{
+        AgentBehavior, AgentContext, AgentInput, AgentOutput, 
+        AgentBehaviorConfig, HumanApprovalResponse
+    },
+    chatbot::ChatbotAgent,
+    investigator::InvestigatorAgent,
+    provider::{self, LLMProvider, LLMConfig},
+    result::{AgentResult, Finding, FindingSeverity, Recommendation, RiskLevel},
     safety::{SafetyValidator, SafetyConfig},
-    templates,
-    tools::{KubectlTool, PromQLTool, CurlTool, ScriptTool},
+    tools::{
+        kubectl::KubectlTool, promql::PromQLTool, curl::CurlTool, script::ScriptTool
+    },
 };
 use anyhow::Result;
 use std::collections::HashMap;
@@ -15,12 +22,10 @@ use std::sync::Arc;
 use tracing::{info, warn, error, debug};
 use serde_json;
 use rig::{
-    agent::Agent,
-    completion::Chat,
+    completion::Prompt,
     providers::{anthropic, openai},
 };
 use regex::Regex;
-use chrono::Utc;
 use kube::Client as K8sClient;
 
 /// Enum to store different tool types
@@ -108,6 +113,111 @@ impl AgentRuntime {
         self.tools.insert(name, tool.into());
     }
     
+    /// Set up kubectl tool with automatic configuration inference
+    /// 
+    /// This will try to:
+    /// 1. Use the provided k8s_client if already set
+    /// 2. Otherwise, use KubectlTool::infer() to automatically detect configuration
+    pub async fn with_auto_kubectl(mut self) -> Self {
+        // If we already have a k8s client, just return
+        if self.k8s_client.is_some() {
+            return self;
+        }
+        
+        // Try to infer kubectl configuration
+        match KubectlTool::infer().await {
+            Ok(kubectl_tool) => {
+                info!("Successfully inferred kubectl configuration");
+                self.tools.insert("kubectl".to_string(), kubectl_tool.into());
+                
+                // Also try to create a k8s client for other uses
+                if let Ok(client) = K8sClient::try_default().await {
+                    self.k8s_client = Some(client);
+                }
+            }
+            Err(e) => {
+                warn!("Could not infer kubectl configuration: {}", e);
+            }
+        }
+        
+        self
+    }
+    
+    pub fn list_tools(&self) -> Vec<String> {
+        self.tools.keys().cloned().collect()
+    }
+
+    /// Build the agent context from runtime configuration
+    fn build_agent_context(&self) -> Arc<AgentContext> {
+        // Create both the trait object and concrete type
+        let llm_provider = match provider::create_provider(&self.llm_config) {
+            Ok(provider) => provider,
+            Err(e) => {
+                error!("Failed to create LLM provider: {}", e);
+                Arc::new(provider::MockProvider)
+            }
+        };
+        
+        let llm_provider_type = match provider::LLMProviderType::from_config(&self.llm_config) {
+            Ok(provider_type) => Arc::new(provider_type),
+            Err(e) => {
+                error!("Failed to create LLM provider type: {}", e);
+                Arc::new(provider::LLMProviderType::Mock)
+            }
+        };
+        
+        // If no tools were explicitly added but k8s client is available, add default tools
+        let mut tools = self.tools.clone();
+        if tools.is_empty() && self.k8s_client.is_some() {
+            if let Some(k8s_client) = &self.k8s_client {
+                tools.insert("kubectl".to_string(), KubectlTool::new(k8s_client.clone()).into());
+                tools.insert("promql".to_string(), PromQLTool::new(self.prometheus_endpoint.clone()).into());
+                tools.insert("curl".to_string(), CurlTool::new().into());
+                tools.insert("script".to_string(), ScriptTool::new().into());
+            }
+        }
+        
+        Arc::new(AgentContext {
+            llm_provider,
+            llm_provider_type,
+            model: self.llm_config.model.clone(),
+            temperature: self.llm_config.temperature,
+            tools: Arc::new(tools),
+            k8s_client: self.k8s_client.clone(),
+            prometheus_endpoint: self.prometheus_endpoint.clone(),
+            safety_validator: Arc::new(self.safety_validator.clone()),
+        })
+    }
+    
+    /// Get a chatbot agent for interactive conversations
+    pub fn get_chatbot_agent(&self) -> ChatbotAgent {
+        ChatbotAgent::new(AgentBehaviorConfig::default())
+    }
+    
+    /// Get a chatbot agent with custom configuration
+    pub fn get_chatbot_agent_with_config(&self, config: AgentBehaviorConfig) -> ChatbotAgent {
+        ChatbotAgent::new(config)
+    }
+    
+    /// Get an investigator agent for autonomous investigations
+    pub fn get_investigator_agent(&self) -> InvestigatorAgent {
+        let mut config = AgentBehaviorConfig::default();
+        config.max_iterations = Some(self.max_iterations);
+        config.timeout_seconds = Some(self.timeout.as_secs());
+        InvestigatorAgent::new(config)
+    }
+    
+    /// Get an investigator agent with custom configuration
+    pub fn get_investigator_agent_with_config(&self, config: AgentBehaviorConfig) -> InvestigatorAgent {
+        InvestigatorAgent::new(config)
+    }
+    
+    /// Execute an agent behavior with the given input
+    pub async fn execute<A: AgentBehavior>(&self, agent: &A, input: AgentInput) -> Result<AgentOutput> {
+        let context = self.build_agent_context();
+        agent.handle(input, context).await
+    }
+    
     /// Build a Rig agent with tools for a specific provider
     async fn build_and_chat(&self, prompt: &str) -> Result<String> {
         match self.llm_config.provider.as_str() {
@@ -156,7 +266,8 @@ impl AgentRuntime {
                 }
                 
                 let agent = builder.build();
-                agent.chat(prompt, vec![])
+                agent.prompt(prompt)
+                    .multi_turn(5)  // Allow tool usage
                     .await
                     .map_err(|e| anyhow::anyhow!("Anthropic chat failed: {:?}", e))
             }
@@ -200,7 +311,8 @@ impl AgentRuntime {
                 }
                 
                 let agent = builder.build();
-                agent.chat(prompt, vec![])
+                agent.prompt(prompt)
+                    .multi_turn(5)  // Allow tool usage
                     .await
                     .map_err(|e| anyhow::anyhow!("OpenAI chat failed: {:?}", e))
             }
@@ -217,53 +329,56 @@ impl AgentRuntime {
         goal: &str,
         context: HashMap<String, String>,
     ) -> Result<AgentResult> {
-        info!("Starting agent investigation");
+        info!("Starting agent investigation (using new InvestigatorAgent)");
         debug!("Goal: {}", goal);
         debug!("Context: {:?}", context);
         
-        let mut result = AgentResult::new(
-            "Investigation in progress...".to_string()
-        );
+        // Create investigator agent
+        let investigator = self.get_investigator_agent();
+        let agent_context = self.build_agent_context();
         
-        // Get alert name from context for template lookup
-        let alert_name = context.get("alert_name").cloned().unwrap_or_default();
+        // Create investigation input
+        let input = AgentInput::InvestigationGoal {
+            goal: goal.to_string(),
+            initial_data: serde_json::to_value(&context)?,
+            workflow_id: "backward-compat-investigation".to_string(),
+            alert_context: Some(context),
+        };
         
-        // Build investigation prompt
-        let prompt = templates::get_investigation_prompt(&alert_name, &context);
+        // Run investigation
+        let output = investigator.handle(input, agent_context).await?;
         
-        // Build the investigation prompt
-        let investigation_prompt = format!(
-            "{}\n\nGoal: {}\n\n\
-            Investigate this issue step by step. Use the available tools to gather evidence. \
-            After investigation, provide:\n\
-            1. Root cause analysis\n\
-            2. Key findings\n\
-            3. Recommendations\n\
-            4. Whether this can be auto-fixed\n\n\
-            Structure your final response with clear sections:\n\
-            ROOT CAUSE: <explanation>\n\
-            FINDINGS:\n- finding 1\n- finding 2\n\
-            RECOMMENDATIONS:\n- recommendation 1\n- recommendation 2\n\
-            AUTO-FIX: <yes/no and command if applicable>",
-            prompt, goal
-        );
-        
-        // Use the provider-specific agent
-        let response = self.build_and_chat(&investigation_prompt).await?;
-        
-        debug!("Agent response: {}", response);
-        
-        // Parse the structured response
-        self.parse_final_analysis(&response, &mut result)?;
-        
-        // Note: With Rig's agent system, tool calls are handled automatically
-        // We don't have access to the individual tool calls made, so we can't populate actions_taken
-        // This is a limitation of using the high-level agent interface
-        
-        // Get confidence score from LLM
-        result.confidence = (self.get_confidence_score(&result).await.unwrap_or(60.0) / 100.0) as f32;
-        
-        Ok(result)
+        // Handle the output
+        match output {
+            AgentOutput::FinalInvestigationResult(result) => Ok(result),
+            AgentOutput::PendingHumanApproval { workflow_id, current_investigation_state, .. } => {
+                // For backward compatibility, if approval is needed, auto-deny and return partial result
+                info!("Investigation requires approval, auto-denying for backward compatibility");
+                
+                let denied_input = AgentInput::ResumeInvestigation {
+                    original_goal: goal.to_string(),
+                    approval_response: HumanApprovalResponse {
+                        approved: false,
+                        feedback: Some("Automatic denial for backward compatibility".to_string()),
+                        selected_option: Some("Deny".to_string()),
+                        approver: "system".to_string(),
+                        approval_time: chrono::Utc::now(),
+                    },
+                    saved_state: current_investigation_state,
+                    workflow_id,
+                };
+                
+                let final_output = investigator.handle(denied_input, self.build_agent_context()).await?;
+                match final_output {
+                    AgentOutput::FinalInvestigationResult(result) => Ok(result),
+                    _ => Err(anyhow::anyhow!("Unexpected output from investigator after denial")),
+                }
+            }
+            AgentOutput::Error { message, .. } => {
+                Err(anyhow::anyhow!("Investigation failed: {}", message))
+            }
+            _ => Err(anyhow::anyhow!("Unexpected output type from investigator")),
+        }
     }
     
     /// Mock investigation response for testing
@@ -452,5 +567,117 @@ impl AgentRuntime {
         }
         
         None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    
+    #[tokio::test]
+    async fn test_agent_runtime_creation() {
+        let config = LLMConfig {
+            provider: "mock".to_string(),
+            model: "test-model".to_string(),
+            api_key: None,
+            endpoint: None,
+            temperature: None,
+            max_tokens: None,
+            timeout_seconds: None,
+        };
+        
+        let runtime = AgentRuntime::new(config).unwrap();
+        assert!(runtime.k8s_client.is_none());
+    }
+    
+    #[tokio::test]
+    async fn test_chatbot_agent_creation() {
+        let config = LLMConfig {
+            provider: "mock".to_string(),
+            model: "test-model".to_string(),
+            api_key: None,
+            endpoint: None,
+            temperature: None,
+            max_tokens: None,
+            timeout_seconds: None,
+        };
+        
+        let runtime = AgentRuntime::new(config).unwrap();
+        let chatbot = runtime.get_chatbot_agent();
+        
+        // Test that we can execute a chat message
+        let input = AgentInput::ChatMessage {
+            content: "Hello, can you help me check pod status?".to_string(),
+            history: vec![],
+            session_id: Some("test-session".to_string()),
+            user_id: Some("test-user".to_string()),
+        };
+        
+        let output = runtime.execute(&chatbot, input).await.unwrap();
+        
+        match output {
+            AgentOutput::ChatResponse { message, .. } => {
+                assert!(message.contains("mock mode"));
+            }
+            _ => panic!("Expected ChatResponse"),
+        }
+    }
+    
+    #[tokio::test]
+    async fn test_investigator_agent_creation() {
+        let config = LLMConfig {
+            provider: "mock".to_string(),
+            model: "test-model".to_string(),
+            api_key: None,
+            endpoint: None,
+            temperature: None,
+            max_tokens: None,
+            timeout_seconds: None,
+        };
+        
+        let runtime = AgentRuntime::new(config).unwrap();
+        let investigator = runtime.get_investigator_agent();
+        
+        // Test investigation
+        let input = AgentInput::InvestigationGoal {
+            goal: "Investigate PodCrashLooping alert".to_string(),
+            initial_data: serde_json::json!({"alert": "PodCrashLooping"}),
+            workflow_id: "test-workflow".to_string(),
+            alert_context: None,
+        };
+        
+        let output = runtime.execute(&investigator, input).await.unwrap();
+        
+        match output {
+            AgentOutput::FinalInvestigationResult(result) => {
+                assert!(result.root_cause.is_some());
+                assert!(!result.findings.is_empty());
+            }
+            _ => panic!("Expected FinalInvestigationResult"),
+        }
+    }
+    
+    #[tokio::test]
+    async fn test_backward_compatibility() {
+        let config = LLMConfig {
+            provider: "mock".to_string(),
+            model: "test-model".to_string(),
+            api_key: None,
+            endpoint: None,
+            temperature: None,
+            max_tokens: None,
+            timeout_seconds: None,
+        };
+        
+        let runtime = AgentRuntime::new(config).unwrap();
+        
+        // Test the backward-compatible investigate method
+        let mut context = HashMap::new();
+        context.insert("alert_name".to_string(), "PodCrashLooping".to_string());
+        
+        let result = runtime.investigate("Check why pod is crashing", context).await.unwrap();
+        
+        assert!(result.root_cause.is_some());
+        assert!(result.can_auto_fix);
     }
 } 

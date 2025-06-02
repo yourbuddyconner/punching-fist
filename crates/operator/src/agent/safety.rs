@@ -56,6 +56,7 @@ impl Default for SafetyConfig {
 }
 
 /// Safety validator for agent operations
+#[derive(Clone)]
 pub struct SafetyValidator {
     config: SafetyConfig,
 }

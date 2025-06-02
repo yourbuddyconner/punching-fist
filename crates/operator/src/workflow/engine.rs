@@ -56,11 +56,45 @@ impl WorkflowEngine {
             let engine = self.clone();
             let execution_id = Uuid::new_v4().to_string();
             
-            // Create execution record
+            // Create execution record with properly populated context
+            let mut context = WorkflowContext::new();
+            
+            // Add runtime configuration to context metadata
+            context.add_metadata("runtime_image", serde_json::Value::String(workflow.spec.runtime.image.clone()));
+            context.add_metadata("llm_config", serde_json::to_value(&workflow.spec.runtime.llm_config).unwrap_or_default());
+            
+            // Add environment variables to context
+            for (key, value) in &workflow.spec.runtime.environment {
+                context.add_metadata(&format!("env_{}", key), serde_json::Value::String(value.clone()));
+            }
+            
+            // Parse and add source data from annotations
+            if let Some(annotations) = &workflow.metadata.annotations {
+                // Add alert metadata
+                if let Some(alert_name) = annotations.get("alert.name") {
+                    context.add_metadata("alert_name", serde_json::Value::String(alert_name.clone()));
+                }
+                if let Some(severity) = annotations.get("alert.severity") {
+                    context.add_metadata("severity", serde_json::Value::String(severity.clone()));
+                }
+                
+                // Parse and add source data for template rendering
+                if let Some(source_data_str) = annotations.get("source.data") {
+                    if let Ok(source_data) = serde_json::from_str::<serde_json::Value>(source_data_str) {
+                        // Add source data to input context so templates can access it
+                        let mut input = serde_json::Map::new();
+                        input.insert("source".to_string(), serde_json::json!({
+                            "data": source_data
+                        }));
+                        context.input = serde_json::Value::Object(input);
+                    }
+                }
+            }
+            
             let execution = WorkflowExecution {
                 workflow: workflow.clone(),
                 state: WorkflowState::Pending,
-                context: WorkflowContext::new(),
+                context,
                 outputs: serde_json::json!({}),
             };
             

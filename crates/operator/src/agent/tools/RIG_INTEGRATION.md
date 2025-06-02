@@ -1,6 +1,43 @@
-# Rig Tools Integration
+# Rig Integration for Tools
 
-This module provides tools that implement [Rig's Tool trait](https://docs.rs/rig-core/latest/rig/tool/trait.Tool.html) for use with LLM agents.
+This directory contains tool implementations that integrate with the [Rig](https://github.com/0xPlaygrounds/rig) agent framework.
+
+## Tool Architecture
+
+Each tool implements Rig's `Tool` trait, providing:
+- Type-safe parameter handling
+- Automatic OpenAPI schema generation for LLMs
+- Consistent error handling
+- Async execution
+
+## Available Tools
+
+### KubectlTool
+Provides safe kubectl command execution for Kubernetes operations.
+
+```rust
+// Method 1: Automatic configuration detection
+let kubectl = KubectlTool::infer().await?;
+// This will automatically use:
+// 1. Kubeconfig from KUBECONFIG env var or ~/.kube/config
+// 2. In-cluster service account if kubeconfig is not available
+
+// Method 2: Explicit client
+let k8s_client = Client::try_default().await?;
+let kubectl = KubectlTool::new(k8s_client);
+```
+
+**Supported Resources:**
+- `pods` / `pod` - Get individual pods or list all pods in a namespace
+- `namespaces` / `namespace` / `ns` - Get individual namespaces or list all namespaces
+
+**Supported Commands:**
+- `kubectl get pods [-n namespace]` - List pods
+- `kubectl get pod <name> [-n namespace]` - Get specific pod details
+- `kubectl get namespaces` - List all namespaces
+- `kubectl get namespace <name>` - Get specific namespace details
+
+Additional commands like `describe`, `logs`, `top`, and `events` are recognized but not yet fully implemented.
 
 ## Overview
 

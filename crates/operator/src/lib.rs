@@ -9,6 +9,7 @@ pub mod server;
 pub mod workflow;
 pub mod agent;
 pub mod sinks;
+pub mod template;
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -43,4 +44,14 @@ pub enum Error {
     NotFound(String),
 }
 
-pub type Result<T> = std::result::Result<T, Error>; 
+pub type Result<T> = std::result::Result<T, Error>;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn it_works() {
+        assert_eq!(2 + 2, 4);
+    }
+} 

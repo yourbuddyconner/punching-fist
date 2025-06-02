@@ -10,11 +10,13 @@ use serde_json::Value;
 use tokio::time::timeout;
 use tracing::{error, info, warn};
 use futures::{StreamExt, TryStreamExt};
+use tera::{Tera, Context as TeraContext};
+use regex;
 
 use crate::{
     crd::{WorkflowStep, StepType},
     workflow::WorkflowContext,
-    agent::{AgentRuntime, LLMConfig, tools::{kubectl::KubectlTool, promql::PromQLTool, curl::CurlTool, script::ScriptTool}},
+    agent::{AgentRuntime, LLMConfig, tools::{kubectl::KubectlTool, promql::PromQLTool, curl::CurlTool, script::ScriptTool}, provider::map_anthropic_model},
     Result, Error,
 };
 
@@ -130,12 +132,21 @@ impl StepExecutor {
             .ok_or_else(|| Error::Validation("Agent step missing goal".to_string()))?;
 
         // Get LLM config from context or use defaults
-        let llm_config = if let Some(config_value) = context.get_metadata("llm_config") {
+        let mut llm_config = if let Some(config_value) = context.get_metadata("llm_config") {
             serde_json::from_value(config_value.clone())
                 .unwrap_or_else(|_| LLMConfig::default())
         } else {
             LLMConfig::default()
         };
+
+        // Apply model mapping for Anthropic models to ensure correct API identifiers
+        if llm_config.provider == "anthropic" || llm_config.provider == "claude" {
+            let mapped_model = map_anthropic_model(&llm_config.model);
+            if mapped_model != llm_config.model {
+                info!("Mapped model '{}' to '{}' for Anthropic API", llm_config.model, mapped_model);
+                llm_config.model = mapped_model.to_string();
+            }
+        }
 
         // Create agent runtime
         let mut agent_runtime = AgentRuntime::new(llm_config)
@@ -373,46 +384,8 @@ impl StepExecutor {
     }
 
     fn render_template(&self, template: &str, context: &WorkflowContext) -> Result<String> {
-        // Simple template rendering - replace {{path.to.value}} with actual values
-        let mut result = template.to_string();
         let template_context = context.get_template_context();
-
-        // Find all template variables
-        let re = regex::Regex::new(r"\{\{([^}]+)\}\}").unwrap();
-        for cap in re.captures_iter(template) {
-            if let Some(path) = cap.get(1) {
-                let path_str = path.as_str().trim();
-                if let Some(value) = self.get_value_by_path(&template_context, path_str) {
-                    let value_str = match value {
-                        Value::String(s) => s.clone(),
-                        _ => value.to_string(),
-                    };
-                    result = result.replace(&format!("{{{{{}}}}}", path_str), &value_str);
-                }
-            }
-        }
-
-        Ok(result)
-    }
-
-    fn get_value_by_path<'a>(&self, value: &'a Value, path: &str) -> Option<&'a Value> {
-        let parts: Vec<&str> = path.split('.').collect();
-        let mut current = value;
-
-        for part in parts {
-            match current {
-                Value::Object(map) => {
-                    current = map.get(part)?;
-                }
-                Value::Array(arr) => {
-                    let index: usize = part.parse().ok()?;
-                    current = arr.get(index)?;
-                }
-                _ => return None,
-            }
-        }
-
-        Some(current)
+        crate::template::render_template(template, &template_context)
     }
 
     fn evaluate_condition(&self, condition: &str, context: &WorkflowContext) -> Result<bool> {
@@ -428,34 +401,14 @@ impl StepExecutor {
         let operator = parts[1];
         let expected = parts[2].trim_matches('"').trim_matches('\'');
 
-        let template_context = context.get_template_context();
-        let actual = self.get_value_by_path(&template_context, path);
+        // Use Tera to evaluate the path
+        let path_template = format!("{{{{ {} }}}}", path);
+        let actual_value = self.render_template(&path_template, context)
+            .unwrap_or_else(|_| String::new());
 
         match operator {
-            "==" => {
-                if let Some(value) = actual {
-                    match value {
-                        Value::String(s) => Ok(s == expected),
-                        Value::Bool(b) => Ok(b.to_string() == expected),
-                        Value::Number(n) => Ok(n.to_string() == expected),
-                        _ => Ok(false),
-                    }
-                } else {
-                    Ok(false)
-                }
-            }
-            "!=" => {
-                if let Some(value) = actual {
-                    match value {
-                        Value::String(s) => Ok(s != expected),
-                        Value::Bool(b) => Ok(b.to_string() != expected),
-                        Value::Number(n) => Ok(n.to_string() != expected),
-                        _ => Ok(true),
-                    }
-                } else {
-                    Ok(true)
-                }
-            }
+            "==" => Ok(actual_value == expected),
+            "!=" => Ok(actual_value != expected),
             _ => Err(Error::Validation(format!("Unknown operator: {}", operator))),
         }
     }

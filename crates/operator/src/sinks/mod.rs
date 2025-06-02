@@ -12,6 +12,16 @@ pub mod stdout;
 // use serde_json::Value;
 // use async_trait::async_trait;
 
+use serde_json::Value;
+use async_trait::async_trait;
+use crate::{Result, crd::sink::SinkConfig};
+
+#[async_trait]
+pub trait Sink: Send + Sync {
+    fn name(&self) -> &str;
+    async fn send(&self, context: Value) -> Result<()>;
+}
+
 /*
 #[async_trait]
 pub trait Sink {

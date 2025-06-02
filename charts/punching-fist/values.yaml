@@ -30,8 +30,8 @@ agent:
   # API key for the provider - set via --set or use existing secret
   anthropicApiKey: ""
   openaiApiKey: ""
-  # Model to use
-  model: "claude-3-5-sonnet"
+  # Model to use - using latest Sonnet model which maps to claude-3-5-sonnet-latest
+  model: "claude-3-5-sonnet-latest"
   # Temperature for LLM responses
   temperature: 0.7
   # Max tokens for responses

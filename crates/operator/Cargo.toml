@@ -11,6 +11,10 @@ description.workspace = true
 name = "generate-crds"
 path = "src/bin/generate_crds.rs"
 
+[[bin]]
+name = "test-agent"
+path = "src/bin/test_agent.rs"
+
 [[example]]
 name = "test_agent"
 path = "examples/test_agent.rs"
@@ -82,14 +86,23 @@ async-trait.workspace = true
 # UUID
 uuid.workspace = true
 
+# URL parsing
+url = "2.5"
+
 # Hashing
 sha2 = "0.10"
 
 # Regex
 regex = "1.10"
 
+# Template engine
+tera = "1.20"
+
 # LLM Integration
 rig-core = "0.12"
+
+# CLI parsing
+clap = { version = "4", features = ["derive"] }
 
 [dev-dependencies]
 tokio-test.workspace = true

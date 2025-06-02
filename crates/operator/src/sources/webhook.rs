@@ -292,6 +292,8 @@ impl WebhookHandler {
             if workflow_instance.metadata.annotations.is_none() {
                 workflow_instance.metadata.annotations = Some(Default::default());
             }
+            
+            // Add minimal alert info for backward compatibility
             workflow_instance.metadata.annotations.as_mut().unwrap().insert(
                 "alert.id".to_string(),
                 alert.id.to_string(),
@@ -303,6 +305,24 @@ impl WebhookHandler {
             workflow_instance.metadata.annotations.as_mut().unwrap().insert(
                 "alert.severity".to_string(),
                 format!("{:?}", alert.severity),
+            );
+            
+            // Add the full alert data structure that templates expect
+            // This creates the structure: source.data.alerts[0]
+            let alert_data = serde_json::json!({
+                "alerts": [{
+                    "labels": alert.labels.clone(),
+                    "annotations": alert.annotations.clone(),
+                    "status": "firing",  // Default to firing for compatibility
+                    "startsAt": alert.starts_at,
+                    "endsAt": alert.ends_at,
+                }]
+            });
+            
+            // Store the alert data as JSON string in annotation
+            workflow_instance.metadata.annotations.as_mut().unwrap().insert(
+                "source.data".to_string(),
+                serde_json::to_string(&alert_data).unwrap_or_default(),
             );
             
             engine.queue_workflow(workflow_instance).await?;

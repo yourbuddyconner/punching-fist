@@ -18,6 +18,33 @@ use kube::Client;
 async fn main() -> Result<()> {
     println!("🛠️  Rig Tools Integration Example\n");
     
+    // Demonstrate two ways to create kubectl tool
+    println!("📝 Creating Kubectl Tool...\n");
+    
+    // Method 1: Using infer() to automatically detect configuration
+    println!("Method 1: Using KubectlTool::infer() for automatic configuration");
+    match KubectlTool::infer().await {
+        Ok(kubectl) => {
+            println!("✅ Successfully created kubectl tool using inferred config");
+            println!("   This automatically detected your kubeconfig or in-cluster service account");
+            
+            // Test the inferred tool
+            let args = ToolArgs {
+                command: "kubectl get namespaces".to_string(),
+            };
+            if let Ok(result) = kubectl.call(args).await {
+                if result.success {
+                    println!("   Test command successful!");
+                }
+            }
+        }
+        Err(e) => {
+            println!("⚠️  Could not infer Kubernetes config: {}", e);
+            println!("   Make sure you have a valid kubeconfig or are running in a cluster");
+        }
+    }
+    
+    println!("\nMethod 2: Using explicit Client");
     // Create Kubernetes client
     let k8s_client = match Client::try_default().await {
         Ok(client) => client,

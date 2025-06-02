@@ -13,7 +13,7 @@ use tracing::{debug, error, info, warn};
 use crate::crd::sink::{Sink, SinkSpec, SinkStatus, SinkType as CRDSinkType}; // Using authoritative definitions
 use crate::crd::source::Condition;
 use crate::sinks::stdout::StdoutSink;
-use crate::sinks::stdout::SinkOutput; // The trait we defined
+use crate::sinks::Sink as SinkTrait; // Import the Sink trait
 use crate::{Result, Error};
 
 #[derive(Clone)] // Added Clone
@@ -168,10 +168,10 @@ impl SinkController {
         match sink_spec.sink_type {
             CRDSinkType::Stdout => {
                 // The name for the SinkOutput instance can be the CRD name
-                let stdout_sink = StdoutSink::new(Some(sink_name.to_string()), &sink_spec)
+                let stdout_sink = StdoutSink::new(sink_name.to_string(), &sink_spec)
                     .map_err(|e| Error::Config(format!("Failed to create stdout sink: {}", e)))?;
                 info!("Dispatching to StdoutSink: {}", stdout_sink.name());
-                stdout_sink.send(workflow_output_context).await
+                stdout_sink.send(workflow_output_context.clone()).await
                     .map_err(|e| Error::Config(format!("Failed to send to stdout sink: {}", e)))?;
                 
                 // Update sink status with message count
