@@ -2,6 +2,8 @@
 
 A Kubernetes operator that provides intelligent incident response using LLM-powered investigation and automated remediation.
 
+![Punching Fist Operator](./docs/images/hero.png)
+
 ## 🚀 Quick Start
 
 Punching Fist transforms alerts into autonomous investigations:
